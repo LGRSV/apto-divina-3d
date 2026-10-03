@@ -5,8 +5,8 @@ import { open } from './lib.mjs';
 const [,, html, drag = '6', pre = ''] = process.argv;
 const t = await open(html); const { page } = t;
 if (pre) await page.evaluate(pre);
-await page.evaluate(() => { const c = document.querySelector('igreja3d-card'), r = c._renderer, o = r.render.bind(r); window.__r = []; r.render = (s, cam) => { window.__r.push([Math.round(performance.now()), +r.getPixelRatio().toFixed(3), c._orbit.moving ? 1 : 0]); return o(s, cam); }; });
-const q = () => page.evaluate(() => { const c = document.querySelector('igreja3d-card'); return { ...c.getQuality(), pr: +c._renderer.getPixelRatio().toFixed(3), dprFull: c._dprFull, frame: c._renderer.info.render.frame }; });
+await page.evaluate(() => { const c = document.querySelector('apto-vovo-card'), r = c._renderer, o = r.render.bind(r); window.__r = []; r.render = (s, cam) => { window.__r.push([Math.round(performance.now()), +r.getPixelRatio().toFixed(3), c._orbit.moving ? 1 : 0]); return o(s, cam); }; });
+const q = () => page.evaluate(() => { const c = document.querySelector('apto-vovo-card'); return { ...c.getQuality(), pr: +c._renderer.getPixelRatio().toFixed(3), dprFull: c._dprFull, frame: c._renderer.info.render.frame }; });
 const out = { tier: (await q()).tier, start: await q(), samples: [] };
 const t0 = Date.now(); let i = 0;
 await page.mouse.move(700, 450); await page.mouse.down();
@@ -17,8 +17,8 @@ while (Date.now() - t0 < +drag * 1000) {
 out.during = await q();
 await page.mouse.up(); const upAt = await page.evaluate(() => Math.round(performance.now()));
 // espera a câmera assentar (a suavização leva vários quadros no SwiftShader) e o quadro nítido
-await page.waitForFunction(() => !document.querySelector('igreja3d-card')._orbit.moving, null, { timeout: 120000, polling: 100 });
-await page.waitForFunction(() => !document.querySelector('igreja3d-card')._lowRes, null, { timeout: 60000, polling: 50 });
+await page.waitForFunction(() => !document.querySelector('apto-vovo-card')._orbit.moving, null, { timeout: 120000, polling: 100 });
+await page.waitForFunction(() => !document.querySelector('apto-vovo-card')._lowRes, null, { timeout: 60000, polling: 50 });
 await page.waitForTimeout(400); out.after400 = await q();
 await page.waitForTimeout(2500); const a = await q(); out.settled = a;
 await page.waitForTimeout(4000); out.idleFramesAfter4s = (await q()).frame - a.frame;

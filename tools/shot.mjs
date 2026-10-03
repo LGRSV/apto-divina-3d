@@ -1,7 +1,7 @@
 // Screenshot da demo com Playwright (Chromium + SwiftShader) — para conferir o cartão sem GPU.
 //
 // Uso:   node tools/shot.mjs <index.html> <saida.png> [largura altura] ["JS avaliado depois de carregar"]
-// Ex.:   node tools/shot.mjs index.html /tmp/vista.png 1400 900 'document.querySelector("igreja3d-card").setFachada(true)'
+// Ex.:   node tools/shot.mjs index.html /tmp/vista.png 1400 900 'document.querySelector("apto-vovo-card").setFachada(true)'
 //
 // Variáveis de ambiente:
 //   THREE_LOCAL=/caminho/three.module.min.js  → serve esse arquivo no lugar do CDN (máquina sem acesso ao jsdelivr).
@@ -10,10 +10,10 @@
 //   PLAYWRIGHT=/caminho/playwright/index.mjs  → onde está o Playwright (padrão: o pacote `playwright` do Node).
 // Imprime o console da página ([pageerror] = exceção não tratada) e grava o PNG.
 import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, isAbsolute } from 'path';
 import { pathToFileURL } from 'url';
 const pwPath = process.env.PLAYWRIGHT || (existsSync('/opt/node22/lib/node_modules/playwright/index.mjs') ? '/opt/node22/lib/node_modules/playwright/index.mjs' : 'playwright');
-const { chromium } = await import(pwPath.startsWith('/') ? pathToFileURL(pwPath).href : pwPath);
+const { chromium } = await import(isAbsolute(pwPath) ? pathToFileURL(pwPath).href : pwPath);
 const [,, html, out, w = '1400', h = '900', extra = ''] = process.argv;
 if (!html || !out) { console.error('uso: node tools/shot.mjs <index.html> <saida.png> [w h] [js]'); process.exit(2); }
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
