@@ -378,6 +378,8 @@ const ZONES = {
 const LOT = { x0: -1.5, x1: 11.8, z0: -1.5, z1: 10.5, cx: 5.1, cz: 4.5 };
 // Onde a visão de Pessoa começa: no hall de entrada, logo depois da porta (x 8,49), olhando para a sala (−x)
 const WALK_START = { x: 8.0, z: 7.05, yaw: Math.PI / 2 };
+// Patamar do hall do prédio diante da porta de entrada (x 8,49): único piso fora da planta no modo Pessoa (paredes invisíveis em volta)
+const LANDING = { x0: 8.5, x1: 9.7, z0: 6.25, z1: 7.85 };
 // para onde a pessoa olha ao entrar num cômodo (x, y, z do mundo); sem entrada aqui: a vista mais longa do cômodo
 const ROOM_FOCUS = { sala: [2.4, 1.4, 4.4], hall_entrada: [3.5, 1.5, 6.4], cozinha: [3.5, 1.2, 8.6], suite_master: [7.4, 1.0, 1.8],
   suite_visita: [6.7, 1.0, 2.0], suite_americana: [2.0, 1.0, 4.0], varanda: [0.5, 1.4, 0.6], banheiro_americano: [3.55, 1.4, 0.3] };
@@ -1451,15 +1453,1845 @@ class Walker {
 }
 
 // @rooms-begin
-function roomSalaJantar(ctx) {}
+function roomSalaJantar(ctx) {
+  // ---------------------------------------------------------------------------
+  // SALA DE ESTAR + JANTAR + HALL DE ENTRADA — Apartamento Vovó (APTO DIVINA · STORIA)
+  //  · Painel C (MARCENARIA vista C, parede norte z 4,34, face sul): lateral esquerda de 20 + painel ripado
+  //    de Carvalho Natural (tábuas 40/20/29/14/34/19/24/28 com juntas de 1 cm, vão da TV de 1,38 × 0,82 em
+  //    x 1,71–3,09 · y 0,98–1,80 — a TV é objeto do cartão), balcão de 60 (rodapé 10) com 8 portas de 54
+  //    em moldura com palhinha e botões dourados nas juntas, cristaleira de 215 (4 portas de 54, palhinha,
+  //    4 prateleiras de vidro 38/28/28/28/45 com louça, puxadores verticais dourados nas juntas 1|2 e 3|4).
+  //    A porta de correr de marcenaria (1,23 × 2,49, x 5,59–6,78) é do cartão.
+  //  · Estante D (vista D, x 6,45–6,65 · z 4,26–6,53, 228 × 20 × 250, Carvalho): base de 90 com 5 portas de 46
+  //    lisas, nichos 78 (100|122), 43 (33|163|24), 31 (154|68) e objetos. O split nº 9 (cartão) fica no
+  //    trecho z 5,40–6,51 · y 2,07–2,43: ali a prateleira de 2,15 e as divisórias foram omitidas.
+  //  · Buffet B (vista B, x 1,22–3,41 · z 6,76–7,16, 219 × 40 × 85): Gianduia, pés dourados, 5 portas de 44 com
+  //    palhinha; sofá 3 lugares 2,16 × 0,81 (linho) com o encosto no buffet, virado para a TV; tapetes;
+  //    mesa de jantar 2,39 × 0,91 (freijó) + 8 cadeiras com braços; 3 pendentes dourados; cortina de linho
+  //    + voal na porta de vidro da sala (x ≈ 1,10); orquídea, vasos, livros, quadros.
+  //  · Hall de entrada (x 6,76–8,44 · z 6,53–7,59): aparador estreito com espelho em arco, lâmpada,
+  //    quadro na parede sul e capacho diante da porta de entrada (cartão).
+  // Livres: giro da porta de entrada (x 7,59–8,49 · z 6,62–7,49), o vão do hall (x 5,59–6,46 · z 4,24–4,40),
+  // o split da sala e as luminárias. Tudo em coordenadas de mundo (metros). Colisores: ctx.addCollider.
+  // ---------------------------------------------------------------------------
+  const THREE = ctx.THREE, M = ctx.M;
+  const box = (...a) => ctx.box(...a), cyl = (...a) => ctx.cyl(...a), sph = (...a) => ctx.sph(...a);
+  const std = (o) => ctx.std(o), rnd = () => ctx.rnd();
+  const place = (g, x, z, ry = 0, y = 0) => ctx.place(g, x, z, ry, y);
+  const put = (m) => { ctx.add(m); return m; };
+  const G = () => new THREE.Group();
+  const nc = { cast: false };
+  const PI = Math.PI;
+  const FZ = 0, FX = PI / 2, FNX = -PI / 2, FNZ = PI;   // frente (+z local) virada para +z / +x / −x / −z
 
-function roomCozinhaServico(ctx) {}
+  // caixa por extensões em coordenadas de mundo
+  const W = (mat, x0, x1, y0, y1, z0, z1, o) => put(box(x1 - x0, y1 - y0, z1 - z0, mat, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, o));
+  // idem, dentro de um grupo local
+  const L = (g, mat, x0, x1, y0, y1, z0, z1, o) => { const m = box(x1 - x0, y1 - y0, z1 - z0, mat, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, o); g.add(m); return m; };
+  const solid = (x0, z0, x1, z1) => {
+    const f = ctx.addCollider || ctx.collider || ctx.collide;
+    if (typeof f === 'function') f(x0, z0, x1, z1);
+    else if (Array.isArray(ctx.colliders)) ctx.colliders.push([x0, z0, x1, z1]);
+  };
+  const puff = (mat, cx, cy, cz, sx, sy, sz, rx = 0, ry = 0, rz = 0, o) => {
+    const m = sph(1, mat, cx, cy, cz); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz);
+    if (o && o.cast === false) m.castShadow = false;
+    return put(m);
+  };
 
-function roomSuiteMaster(ctx) {}
+  // ---- materiais (mesmas opções → mesmo material) -------------------------------------------------
+  const pick = (k, o) => M[k] || std(o);
+  const carvalho = pick('carvalho', { color: 0xcdb28a, roughness: 0.6 });
+  const gianduia = pick('gianduia', { color: 0xb8a792, roughness: 0.38 });
+  const palhinha = pick('palhinha', { color: 0xd8bf8c, roughness: 0.9, side: THREE.DoubleSide });
+  const freijo  = pick('freijo',  { color: 0xdcc190, roughness: 0.55 });
+  const dourado = pick('dourado', { color: 0xc9a66b, roughness: 0.3, metalness: 0.85 });
+  const linho   = pick('linho',   { color: 0xe5dfd2, roughness: 0.97 });
+  const espelho = pick('espelho', { color: 0xdfe6ea, roughness: 0.05, metalness: 1 });
+  const carvInt = std({ color: 0xb9996c, roughness: 0.75 });            // interior de nichos e fundos
+  const carvDk  = std({ color: 0x6f5a3e, roughness: 0.85 });            // corpo atrás das portas / rodapé
+  const gianDk  = std({ color: 0x8a7b69, roughness: 0.6 });             // fundo e rodapé do buffet
+  const glassShelf = std({ color: 0xdbe9e4, roughness: 0.1, transparent: true, opacity: 0.32 });
+  const sofaM   = std({ color: 0xe3ddcf, roughness: 0.98 });            // linho do sofá
+  const sofaLt  = std({ color: 0xebe6da, roughness: 0.98 });
+  const sofaDk  = std({ color: 0xd3cbbb, roughness: 0.98 });
+  const pillowSand = std({ color: 0xc9b08f, roughness: 0.96 });
+  const pillowTerra = std({ color: 0xbf8f77, roughness: 0.96 });
+  const pillowGray = std({ color: 0xa9aaa4, roughness: 0.96 });
+  const throwM  = std({ color: 0xcdbfa8, roughness: 0.98 });
+  const tableTop = std({ color: 0xe6d0a8, roughness: 0.5 });             // tampo de freijó claro
+  const tableLeg = std({ color: 0xd2b88a, roughness: 0.6 });
+  const chairWood = std({ color: 0xdcc59c, roughness: 0.55 });
+  const chairSeat = std({ color: 0xe9e3d6, roughness: 0.96 });
+  const rugField = std({ color: 0xded7c9, roughness: 1 });
+  const rugEdge = std({ color: 0xc7bda9, roughness: 1 });
+  const rugLine = std({ color: 0xb2a58e, roughness: 1 });
+  const rugField2 = std({ color: 0xd5cdbb, roughness: 1 });
+  const rugDin  = std({ color: 0xd9cfba, roughness: 1 });
+  const rugDinE = std({ color: 0xb8a98c, roughness: 1 });
+  const curtainM = std({ color: 0xe4ddcf, roughness: 0.98 });
+  const curtainM2 = std({ color: 0xd9d1c0, roughness: 0.98 });
+  const sheer   = std({ color: 0xf5f2ea, roughness: 0.9, transparent: true, opacity: 0.34, side: THREE.DoubleSide });
+  const railM   = std({ color: 0xf2f0ea, roughness: 0.6 });
+  const ceramic = std({ color: 0xf1eee8, roughness: 0.35 });
+  const ceramicBg = std({ color: 0xcbbfa9, roughness: 0.5 });
+  const ceramicDk = std({ color: 0x4a443d, roughness: 0.5 });
+  const ceramicTerra = std({ color: 0xb98a6c, roughness: 0.6 });
+  const paperW  = std({ color: 0xf7f4ee, roughness: 0.9 });
+  const bookBlk = std({ color: 0x25231f, roughness: 0.7 });
+  const bookGray = std({ color: 0x5b5a56, roughness: 0.7 });
+  const book1   = std({ color: 0x8c9db0, roughness: 0.8 });
+  const book2   = std({ color: 0xc6b08e, roughness: 0.8 });
+  const book3   = std({ color: 0xe8e2d4, roughness: 0.8 });
+  const book4   = std({ color: 0xa88f73, roughness: 0.8 });
+  const frameG  = dourado;
+  const frameW  = std({ color: 0xe9e2d3, roughness: 0.55 });
+  const potM    = std({ color: 0xd8cfbf, roughness: 0.7 });
+  const potDk   = std({ color: 0x3a3733, roughness: 0.6 });
+  const soil    = std({ color: 0x3d2b1c, roughness: 1 });
+  const leafA   = std({ color: 0x4a6b3c, roughness: 0.8 });
+  const leafB   = std({ color: 0x5b7c46, roughness: 0.8 });
+  const stemM   = std({ color: 0x6a5a3c, roughness: 0.9 });
+  const dryM    = std({ color: 0xcdb98f, roughness: 0.95 });
+  const orchidW = std({ color: 0xf6f3ee, roughness: 0.6 });
+  const orchidC = std({ color: 0xd9b6c4, roughness: 0.6 });
+  const plateM  = std({ color: 0xf3f0ea, roughness: 0.3 });
+  const plateGr = std({ color: 0xc9c6bb, roughness: 0.35 });
+  const glassM  = std({ color: 0xdfeee8, roughness: 0.05, transparent: true, opacity: 0.45 });
+  const matCoir = std({ color: 0x8c7658, roughness: 1 });
+  const matCoirE = std({ color: 0x4d4033, roughness: 1 });
+  const shadeLamp = std({ color: 0xece5d6, roughness: 0.9, side: THREE.DoubleSide });
+  // lâmpadas / cúpulas ligadas às entidades de luz (sem a API, ficam como materiais comuns)
+  const bindE = (key, mat, max, o) => (ctx.bindEmissive ? ctx.bindEmissive(key, mat, max, o) : mat);
+  const bulbSala = bindE('luz_sala', new THREE.MeshStandardMaterial({ color: 0xfff1d6, roughness: 0.4, emissive: 0xffd9a0, emissiveIntensity: 0 }), 1.4, { min: 0 });
+  const domeInSala = bindE('luz_sala', new THREE.MeshStandardMaterial({ color: 0xf1dfb8, roughness: 0.5, emissive: 0xffc980, emissiveIntensity: 0, side: THREE.BackSide }), 0.7, { min: 0 });
+  const lampShadeHall = bindE('luz_hall_entrada', new THREE.MeshStandardMaterial({ color: 0xece5d6, roughness: 0.9, emissive: 0xffd9a8, emissiveIntensity: 0, side: THREE.DoubleSide }), 0.8, { min: 0 });
 
-function roomSuitesVisita(ctx) {}
+  // ---- geometrias auxiliares ---------------------------------------------------------------------
+  const geoCache = new Map();
+  const rrPath = (p, x0, y0, x1, y1, r) => {
+    p.moveTo(x0 + r, y0); p.lineTo(x1 - r, y0); p.quadraticCurveTo(x1, y0, x1, y0 + r);
+    p.lineTo(x1, y1 - r); p.quadraticCurveTo(x1, y1, x1 - r, y1);
+    p.lineTo(x0 + r, y1); p.quadraticCurveTo(x0, y1, x0, y1 - r);
+    p.lineTo(x0, y0 + r); p.quadraticCurveTo(x0, y0, x0 + r, y0);
+  };
+  const mesh = (geo, mat, x, y, z, cast) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = cast !== false; m.receiveShadow = true; return m; };
+  // porta com abertura de cantos arredondados + tela de palhinha atrás. Frente em zf (para +z local), espessura t.
+  const doorRR = (g, fmat, pmat, x0, x1, y0, y1, zf, t, inset, insetV, r) => {
+    const w = x1 - x0, h = y1 - y0, iw = w - 2 * inset, ih = h - 2 * (insetV == null ? inset : insetV);
+    const key = ['d', w, h, iw, ih, r, t].map((v) => (typeof v === 'number' ? v.toFixed(4) : v)).join(',');
+    let geo = geoCache.get(key);
+    if (!geo) {
+      const s = new THREE.Shape(); s.moveTo(-w / 2, -h / 2); s.lineTo(w / 2, -h / 2); s.lineTo(w / 2, h / 2); s.lineTo(-w / 2, h / 2); s.closePath();
+      const hp = new THREE.Path(); rrPath(hp, -iw / 2, -ih / 2, iw / 2, ih / 2, r); s.holes.push(hp);
+      geo = new THREE.ExtrudeGeometry(s, { depth: t, bevelEnabled: false, curveSegments: 4 });
+      geo.translate(0, 0, -t); geoCache.set(key, geo);
+    }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    g.add(mesh(geo, fmat, cx, cy, zf, true));
+    const pk = ['p', iw + 0.004, ih + 0.004, r].map((v) => (typeof v === 'number' ? v.toFixed(4) : v)).join(',');
+    let pg = geoCache.get(pk);
+    if (!pg) {
+      const s = new THREE.Shape(); rrPath(s, -(iw + 0.004) / 2, -(ih + 0.004) / 2, (iw + 0.004) / 2, (ih + 0.004) / 2, r);
+      pg = new THREE.ShapeGeometry(s, 4); geoCache.set(pk, pg);
+    }
+    g.add(mesh(pg, pmat, cx, cy, zf - t + 0.005, false));
+  };
+  // almofada/estofado arredondado (extrusão com chanfro): w × h × d centrada em (x, y, z)
+  const cush = (g, mat, w, h, d, x, y, z, rad = 0.03, rx = 0, ry = 0, rz = 0) => {
+    const b = Math.min(rad, w / 2.5, h / 2.5, d / 2.5);
+    const key = ['c', w, h, d, rad].map((v) => (typeof v === 'number' ? v.toFixed(4) : v)).join(',');
+    let geo = geoCache.get(key);
+    if (!geo) {
+      const s = new THREE.Shape(); rrPath(s, -(w - 2 * b) / 2, -(h - 2 * b) / 2, (w - 2 * b) / 2, (h - 2 * b) / 2, Math.max(0.004, b * 0.6));
+      geo = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.002, d - 2 * b), bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 3, curveSegments: 4 });
+      geo.translate(0, 0, -(d - 2 * b) / 2); geoCache.set(key, geo);
+    }
+    const m = mesh(geo, mat, x, y, z, true); m.rotation.set(rx, ry, rz); g.add(m); return m;
+  };
 
-function roomBanheiros(ctx) {}
+  // ---- quadros (arte abstrata em greige/azul-acinzentado/terracota suave) ---------------------------
+  const artTex = (kind) => ctx.makeTex ? ctx.makeTex(256, (g, s) => {
+    g.fillStyle = kind === 0 ? '#e9e1d2' : kind === 1 ? '#ddd6c8' : '#e6dfd0'; g.fillRect(0, 0, s, s);
+    if (kind === 0) {
+      const cols = ['#c9b79b', '#a9b4bf', '#d9c9ae', '#b7a285'];
+      for (let i = 0; i < 4; i++) { g.fillStyle = cols[i]; g.beginPath(); g.arc(s * (0.28 + i * 0.15), s * 0.62, s * (0.32 - i * 0.045), PI, 0); g.lineTo(s * (0.6 + i * 0.15 - 0.05 * i), s * 0.9); g.lineTo(s * (-0.04 + i * 0.15), s * 0.9); g.fill(); }
+    } else if (kind === 1) {
+      const cols = ['#b9c3cc', '#cdbfa6', '#a99a82', '#dcd3c0'];
+      for (let i = 0; i < 4; i++) { g.fillStyle = cols[i]; g.fillRect(0, s * (0.12 + i * 0.2), s, s * (0.14 + 0.02 * i)); }
+      g.fillStyle = '#c4a584'; g.beginPath(); g.arc(s * 0.68, s * 0.34, s * 0.12, 0, PI * 2); g.fill();
+    } else {
+      const cols = ['#bfa58a', '#9fb0bf', '#d4c2a6'];
+      for (let i = 0; i < 3; i++) { g.fillStyle = cols[i]; g.beginPath(); g.ellipse(s * (0.3 + 0.2 * i), s * (0.5 + 0.1 * Math.sin(i * 2)), s * 0.22, s * 0.3, i * 0.6, 0, PI * 2); g.fill(); }
+    }
+  }) : null;
+  const art0 = artTex(0), art1 = artTex(1), art2 = artTex(2);
+  const artMat = (t) => t ? std({ map: t, roughness: 0.9 }) : std({ color: 0xcfc4ae, roughness: 0.9 });
+  const picture = (x, y, z, ry, w, h, tex, frame) => {
+    const g = G();
+    g.add(box(w, h, 0.03, frame, 0, h / 2, 0.015, nc));
+    g.add(box(w - 0.05, h - 0.05, 0.012, paperW, 0, h / 2, 0.034, nc));
+    g.add(box(w - 0.13, h - 0.13, 0.008, artMat(tex), 0, h / 2, 0.04, nc));
+    place(g, x, z, ry, y); return g;
+  };
+
+  // ---- planta de folhas largas -----------------------------------------------------------------
+  const plantAt = (g, x, y, z, s = 1, pot = potM) => {
+    g.add(cyl(0.12 * s, 0.09 * s, 0.24 * s, pot, x, y + 0.12 * s, z, 14));
+    g.add(cyl(0.105 * s, 0.105 * s, 0.01, soil, x, y + 0.245 * s, z, 12));
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.1, bx = x + Math.cos(a) * 0.02 * s, bz = z + Math.sin(a) * 0.02 * s;
+      const st = cyl(0.008 * s, 0.01 * s, 0.7 * s, stemM, bx, y + 0.58 * s, bz, 6); st.rotation.z = Math.cos(a) * 0.08; st.rotation.x = Math.sin(a) * 0.08; g.add(st);
+    }
+    for (let i = 0; i < 11; i++) {
+      const a = i * 2.4 + rnd() * 0.5, h = (0.5 + (i % 5) * 0.12 + rnd() * 0.06) * s, r = (0.1 + (i % 3) * 0.04) * s;
+      const m = sph(1, i % 2 ? leafA : leafB, x + Math.cos(a) * r, y + 0.25 * s + h, z + Math.sin(a) * r);
+      m.scale.set(0.1 * s, 0.025 * s, 0.17 * s); m.rotation.set(0.6, -a, Math.cos(a) * 0.5); m.castShadow = false; g.add(m);
+    }
+  };
+  // vasinho com folhagem/ramos secos, dentro de um grupo
+  const vaseDry = (g, x, y, z, s = 1, mat = ceramicBg) => {
+    g.add(cyl(0.045 * s, 0.062 * s, 0.24 * s, mat, x, y + 0.12 * s, z, 16));
+    for (let i = 0; i < 7; i++) {
+      const b = cyl(0.004, 0.005, (0.45 + (i % 3) * 0.1) * s, dryM, x + (i - 3) * 0.011, y + 0.45 * s, z + (i % 2 - 0.5) * 0.02, 5);
+      b.rotation.z = (i - 3) * 0.1; b.rotation.x = (i % 3 - 1) * 0.08; b.castShadow = false; g.add(b);
+      const f = sph(1, dryM, x + (i - 3) * 0.04, y + (0.68 + (i % 3) * 0.05) * s, z); f.scale.set(0.012, 0.04, 0.012); f.rotation.z = (i - 3) * 0.1; f.castShadow = false; g.add(f);
+    }
+  };
+  const books = (g, x, y, z, list, along = 'x') => {      // pilha horizontal; list = [[w, h, d, mat], ...]
+    let yy = y;
+    list.forEach(([bw, bh, bd, bm], i) => {
+      const o = (i % 2 ? 0.012 : -0.01);
+      g.add(along === 'x' ? box(bw, bh, bd, bm, x + o, yy + bh / 2, z + (i % 3 - 1) * 0.004, nc) : box(bd, bh, bw, bm, x + (i % 3 - 1) * 0.004, yy + bh / 2, z + o, nc));
+      yy += bh;
+    });
+    return yy;
+  };
+
+  // ---- cortina em pregas: tiras com recuos alternados, ao longo de x ('x') ou z ('z') ------------------
+  const pleats = (mat, axis, a0, a1, c, depth, y0, y1, n) => {
+    for (let i = 0; i < n; i++) {
+      const lo = a0 + (a1 - a0) * i / n, hi = a0 + (a1 - a0) * (i + 1) / n + 0.004;
+      const off = depth * (0.5 + 0.5 * Math.sin(i * 1.9 + 0.4)), m = i % 2 ? mat : curtainM2;
+      if (axis === 'x') W(m, lo, hi, y0, y1, c + off - 0.016, c + off + 0.016, nc);
+      else W(m, c + off - 0.016, c + off + 0.016, y0, y1, lo, hi, nc);
+    }
+  };
+
+  // ===========================================================================================
+  // PAINEL C — parede norte (z 4,34), face sul. Grupo local: x = mundo, z = 0 no plano das portas (mundo 4,74);
+  // o corpo vai de z −0,40 (parede) a −0,018; as tábuas do painel ficam de −0,40 a −0,35.
+  // ===========================================================================================
+  {
+    const g = G(); place(g, 0, 4.74, 0, 0);
+    const XL = 1.29, XR = 5.59, XC = 3.43, TOP = 2.50;
+    // lateral esquerda (20) em toda a altura + rodapé
+    L(g, carvalho, 1.09, XL - 0.01, 0.10, TOP, -0.40, -0.35);
+    L(g, carvDk, 1.10, XL - 0.01, 0, 0.10, -0.37, -0.33, nc);
+    // painel ripado: tábuas de 40/20/29/14/34/19/24/28 com juntas de 1 cm; vão da TV 1,38 × 0,82 (x 1,71–3,09 · y 0,98–1,80)
+    {
+      const widths = [0.40, 0.20, 0.29, 0.14, 0.34, 0.19, 0.24, 0.28];
+      const H0 = 1.71, H1 = 3.09, TY0 = 0.98, TY1 = 1.80, YB = 0.70;
+      let x = XL;
+      widths.forEach((bw, i) => {
+        const a = x + 0.0, b = Math.min(x + bw, XC - 0.002); x = x + bw + 0.01;
+        const mat = i % 2 ? carvalho : carvalho;
+        if (b <= H0 || a >= H1) L(g, mat, a, b, YB, TOP, -0.40, -0.35);
+        else {
+          L(g, mat, a, b, YB, TY0, -0.40, -0.35); L(g, mat, a, b, TY1, TOP, -0.40, -0.35);
+          if (a < H0 - 0.003) L(g, mat, a, H0, TY0, TY1, -0.40, -0.35);
+          if (b > H1 + 0.003) L(g, mat, H1, b, TY0, TY1, -0.40, -0.35);
+        }
+      });
+      // fundo escuro das juntas (sombra entre as tábuas) — plano fino no fundo da parede
+      L(g, carvDk, XL, XC, YB, TOP, -0.40, -0.399, nc);
+    }
+    // ---- balcão inferior 60 (rodapé 10 + 60) — prof. 40, x 1,29–5,59, 8 portas de 54 ----
+    L(g, carvDk, XL + 0.01, XR - 0.01, 0, 0.10, -0.37, -0.03, nc);                       // rodapé recuado 3 cm
+    L(g, carvDk, XL, XR, 0.10, 0.68, -0.40, -0.018);                                     // corpo
+    L(g, carvalho, XL - 0.003, XR, 0.68, 0.70, -0.40, 0.004);                            // tampo (exposto à esquerda da cristaleira)
+    const dw = (XR - XL) / 8;
+    for (let i = 0; i < 8; i++) {
+      const x0 = XL + i * dw + 0.0015, x1 = XL + (i + 1) * dw - 0.0015;
+      doorRR(g, carvalho, palhinha, x0, x1, 0.1025, i < 4 ? 0.678 : 0.698, 0, 0.018, 0.05, 0.055, 0.035);
+    }
+    // botões dourados (push-touch) nas juntas 1|2, 3|4, 5|6 e 7|8
+    for (const j of [1, 3, 5, 7]) for (const s of [-1, 1]) {
+      const k = cyl(0.008, 0.008, 0.008, dourado, XL + j * dw + s * 0.04, j < 4 ? 0.664 : 0.684, 0.004, 14); k.rotation.x = PI / 2; g.add(k);
+    }
+    // ---- cristaleira 215 — x 3,43–5,59, y 0,70–2,50 ----
+    {
+      const yBase = 0.70, yTop = 2.50;
+      L(g, carvalho, XC, XC + 0.02, yBase, yTop, -0.40, -0.018);                         // laterais e divisória central
+      L(g, carvalho, XR - 0.02, XR, yBase, yTop, -0.40, -0.018);
+      L(g, carvalho, 4.50, 4.52, yBase, yTop, -0.40, -0.018);
+      L(g, carvalho, XC, XR, 2.45, yTop, -0.40, 0.004);                                   // tampo (5)
+      L(g, carvalho, XC, XR, yBase, yBase + 0.02, -0.40, -0.018);                         // base do vão
+      L(g, carvInt, XC + 0.02, XR - 0.02, yBase + 0.02, 2.45, -0.40, -0.385, nc);         // fundo
+      for (const ys of [2.07, 1.77, 1.47, 1.17]) L(g, glassShelf, XC + 0.02, XR - 0.02, ys - 0.012, ys, -0.385, -0.03, nc);   // prateleiras de vidro 38/28/28/28/45
+      const cw = (XR - XC) / 4;
+      for (let i = 0; i < 4; i++) doorRR(g, carvalho, palhinha, XC + i * cw + 0.0015, XC + (i + 1) * cw - 0.0015, 0.7025, 2.4475, 0, 0.018, 0.05, 0.05, 0.04);
+      // puxadores verticais dourados (pares nas juntas 1|2 e 3|4)
+      for (const j of [1, 3]) for (const s of [-1, 1]) {
+        L(g, dourado, XC + j * cw + s * 0.017 - 0.007, XC + j * cw + s * 0.017 + 0.007, 1.13, 1.49, 0.0, 0.024, nc);
+      }
+      // louça nas prateleiras (vista através da palhinha)
+      const stackPlates = (x, y, z, n, r, mat) => { for (let k = 0; k < n; k++) g.add(cyl(r, r * 0.93, 0.012, mat, x, y + 0.006 + k * 0.013, z, 18, false)).castShadow = false; };
+      const glassS = (x, y, z) => { g.add(cyl(0.032, 0.026, 0.07, glassM, x, y + 0.085, z, 12, true)); g.add(cyl(0.004, 0.004, 0.05, glassM, x, y + 0.025, z, 6)); g.add(cyl(0.025, 0.025, 0.004, glassM, x, y + 0.002, z, 12)); };
+      const cup = (x, y, z, mat) => { g.add(cyl(0.033, 0.026, 0.05, mat, x, y + 0.025, z, 12)); };
+      // prateleira 1 (y 2,07): vasos e travessas altas
+      stackPlates(3.62, 2.07, -0.2, 6, 0.105, plateM); stackPlates(3.84, 2.07, -0.2, 4, 0.085, plateGr);
+      g.add(cyl(0.07, 0.09, 0.2, ceramicBg, 4.15, 2.17, -0.2, 16)); g.add(cyl(0.05, 0.05, 0.14, ceramic, 4.32, 2.14, -0.2, 14));
+      stackPlates(4.75, 2.07, -0.2, 5, 0.1, plateM); g.add(cyl(0.08, 0.06, 0.16, ceramicTerra, 5.0, 2.15, -0.2, 16)); stackPlates(5.3, 2.07, -0.2, 6, 0.11, plateGr);
+      // prateleira 2 (y 1,77): taças
+      for (let k = 0; k < 6; k++) glassS(3.58 + k * 0.1, 1.77, -0.23 + (k % 2) * 0.05);
+      for (let k = 0; k < 5; k++) cup(4.58 + k * 0.095, 1.77, -0.2, k % 2 ? plateM : ceramicBg);
+      g.add(cyl(0.12, 0.07, 0.07, ceramic, 5.2, 1.805, -0.2, 20));
+      // prateleira 3 (y 1,47): xícaras e bowls
+      for (let k = 0; k < 6; k++) cup(3.6 + k * 0.09, 1.47, -0.22 + (k % 2) * 0.08, k % 3 ? plateM : ceramicBg);
+      g.add(cyl(0.11, 0.065, 0.075, ceramicBg, 4.3, 1.5075, -0.2, 20)); g.add(cyl(0.11, 0.065, 0.075, ceramicBg, 4.3, 1.5825, -0.2, 20));
+      stackPlates(4.75, 1.47, -0.2, 7, 0.1, plateGr); stackPlates(5.05, 1.47, -0.2, 7, 0.09, plateM);
+      glassS(5.32, 1.47, -0.14); glassS(5.43, 1.47, -0.14); glassS(5.32, 1.47, -0.26); glassS(5.43, 1.47, -0.26);
+      // prateleira 4 (y 1,17): terrina, jarra, livros de receita
+      g.add(cyl(0.11, 0.1, 0.1, plateM, 3.75, 1.22, -0.2, 20)); g.add(cyl(0.09, 0.09, 0.03, plateM, 3.75, 1.285, -0.2, 20));
+      g.add(cyl(0.05, 0.06, 0.22, glassM, 4.0, 1.28, -0.2, 14));
+      books(g, 4.78, 1.17, -0.2, [[0.24, 0.035, 0.18, book4], [0.22, 0.03, 0.17, book3], [0.23, 0.028, 0.17, book1]]);
+      g.add(cyl(0.07, 0.07, 0.17, ceramicTerra, 5.2, 1.255, -0.2, 14)); cup(5.38, 1.17, -0.2, plateM);
+      // base (vão 45 sobre o balcão): cestos e jarras
+      stackPlates(3.7, 0.72, -0.2, 8, 0.12, plateM); stackPlates(3.9, 0.72, -0.2, 8, 0.1, plateGr);
+      g.add(cyl(0.1, 0.12, 0.28, ceramicBg, 4.2, 0.86, -0.2, 18)); g.add(cyl(0.09, 0.11, 0.22, ceramic, 4.75, 0.83, -0.2, 18));
+      g.add(box(0.3, 0.2, 0.26, matCoir, 5.1, 0.82, -0.2, nc)); g.add(cyl(0.1, 0.1, 0.16, ceramicDk, 5.42, 0.8, -0.2, 18));
+    }
+    // objetos sobre o balcão (y 0,70), à esquerda da cristaleira: orquídea, livros, vasos (fora do vão da TV acima de 0,28)
+    {
+      const y = 0.70;
+      // orquídea num vaso cinza
+      g.add(cyl(0.06, 0.05, 0.12, ceramic, 1.50, y + 0.06, -0.20, 16)); g.add(cyl(0.055, 0.055, 0.01, soil, 1.50, y + 0.12, -0.20, 12));
+      for (let k = 0; k < 5; k++) { const l = sph(1, leafA, 1.50 + Math.cos(k * 1.25) * 0.07, y + 0.16, -0.20 + Math.sin(k * 1.25) * 0.07); l.scale.set(0.09, 0.012, 0.035); l.rotation.y = -k * 1.25; l.castShadow = false; g.add(l); }
+      for (const [dx, dh, nf] of [[0.0, 0.46, 6], [0.07, 0.38, 4]]) {
+        const st = cyl(0.004, 0.004, dh, stemM, 1.5 + dx * 0.4, y + 0.12 + dh / 2, -0.2, 5); st.rotation.z = -0.28 - dx; g.add(st);
+        for (let f = 0; f < nf; f++) {
+          const t = (f + 1) / (nf + 1), fx = 1.5 + dx * 0.4 - Math.sin(0.28 + dx) * dh * t * 0.9, fy = y + 0.12 + dh * t * 0.97;
+          const fl = sph(1, f % 3 === 0 ? orchidC : orchidW, fx, fy + 0.02 * ((f % 2) ? 1 : -1), -0.2 + (f % 2 ? 0.035 : -0.03)); fl.scale.set(0.03, 0.026, 0.01); fl.rotation.y = f * 0.7; fl.castShadow = false; g.add(fl);
+        }
+      }
+      // pilha de livros + esfera
+      books(g, 1.98, y, -0.20, [[0.28, 0.04, 0.2, book1], [0.25, 0.032, 0.19, bookBlk], [0.23, 0.028, 0.18, book2], [0.2, 0.025, 0.16, book3]]);
+      g.add(sph(0.045, dourado, 2.0, y + 0.153, -0.2));
+      // trio de vasos de cerâmica
+      g.add(cyl(0.05, 0.06, 0.2, ceramicBg, 3.05, y + 0.1, -0.2, 16)); g.add(cyl(0.035, 0.045, 0.14, ceramicTerra, 3.14, y + 0.07, -0.16, 14)); vaseDry(g, 3.0, y + 0.2, -0.2, 0.6, ceramicBg);
+      // quadro apoiado na tábua (x 3,15–3,40; fora do vão da TV)
+      const pr = G(); pr.add(box(0.26, 0.34, 0.02, frameW, 0, 0.17, 0, nc)); pr.add(box(0.2, 0.28, 0.006, artMat(art1), 0, 0.17, 0.012, nc));
+      pr.position.set(3.27, y, -0.33); pr.rotation.x = -0.12; g.add(pr);
+    }
+    solid(1.09, 4.34, 5.59, 4.74);
+  }
+
+  // ===========================================================================================
+  // ESTANTE D — x 6,45–6,65 · z 4,26–6,53 (228 × 20 × 250), Carvalho Natural, frente para −x.
+  // Grupo local: x local = z mundo − 4,26; z local 0 = plano das portas (mundo x 6,45), corpo para −z local (→ x 6,65).
+  // ===========================================================================================
+  {
+    const g = G(); place(g, 6.45, 4.26, -PI / 2, 0);
+    const WE = 2.27, D = 0.20;
+    L(g, carvDk, 0.02, WE - 0.02, 0, 0.10, -0.19, -0.03, nc);                            // rodapé recuado 3 cm
+    L(g, carvDk, 0, WE, 0.10, 0.90, -D, -0.018);                                         // corpo da base
+    const dw = WE / 5;
+    for (let i = 0; i < 5; i++) {                                                         // 5 portas lisas de 46
+      L(g, carvalho, i * dw + 0.0015, (i + 1) * dw - 0.0015, 0.1025, 0.8975, -0.018, 0);
+      const hk = (i % 2) ? 0.02 : dw - 0.02;                                              // sulco/pegador discreto (rebaixo) no alto da porta
+      L(g, carvDk, i * dw + dw * 0.25, i * dw + dw * 0.75, 0.884, 0.8905, -0.003, 0.0005, nc);
+    }
+    // parte alta: tampo da base, prateleiras, divisórias, fundo
+    L(g, carvInt, 0.02, WE - 0.02, 0.92, 2.48, -D, -D + 0.012, nc);                      // fundo
+    L(g, carvalho, 0, WE, 0.90, 0.92, -D, 0);                                            // tampo da base
+    L(g, carvalho, 0, WE, 1.70, 1.72, -D, -0.002);                                       // prateleira (78|43)
+    L(g, carvalho, 0, 1.14, 2.15, 2.17, -D, -0.002);                                     // prateleira (43|31) — interrompida onde fica o split
+    L(g, carvalho, 0, WE, 2.48, 2.50, -D, 0);                                            // topo
+    L(g, carvalho, 0, 0.02, 0.92, 2.48, -D, 0); L(g, carvalho, WE - 0.02, WE, 0.92, 2.48, -D, 0);   // laterais
+    L(g, carvalho, 1.02, 1.04, 0.92, 1.70, -D, -0.002);                                  // 100 | 122
+    L(g, carvalho, 0.35, 0.37, 1.72, 2.15, -D, -0.002);                                  // 33 | 163
+    // objetos nos nichos (altura local = mundo)
+    {
+      // nicho baixo esquerdo (x 0,02–1,02 · y 0,92–1,70): livros pretos em pé + vaso + pilha
+      let bx = 0.07;
+      for (let k = 0; k < 7; k++) { const bh = 0.27 + (k % 3) * 0.02, bw = 0.035 + (k % 2) * 0.008; g.add(box(bw, bh, 0.15, k % 3 === 1 ? bookGray : bookBlk, bx + bw / 2, 0.92 + bh / 2, -0.11, nc)); bx += bw + 0.002; }
+      g.add(box(0.005, 0.27, 0.15, bookBlk, bx + 0.02, 1.06, -0.11, nc));
+      books(g, 0.62, 0.92, -0.10, [[0.25, 0.035, 0.17, book3], [0.23, 0.03, 0.16, book4], [0.21, 0.028, 0.15, bookBlk]]);
+      g.add(sph(0.05, dourado, 0.62, 1.07, -0.10));
+      g.add(cyl(0.045, 0.06, 0.26, ceramicBg, 0.9, 1.05, -0.11, 16)); vaseDry(g, 0.9, 1.18, -0.11, 0.55, ceramicBg);
+      // nicho baixo direito (x 1,04–2,25): pilha de livros, caixa de som, escultura, cesto
+      books(g, 1.40, 0.92, -0.10, [[0.30, 0.04, 0.2, bookBlk], [0.27, 0.035, 0.19, book1], [0.24, 0.03, 0.18, book2], [0.22, 0.03, 0.17, bookGray]]);
+      g.add(box(0.2, 0.13, 0.14, ceramicDk, 1.72, 0.985, -0.11, nc)); { const sp = cyl(0.035, 0.035, 0.005, bookGray, 1.72, 0.987, -0.04, 14); sp.rotation.x = PI / 2; g.add(sp); }
+      g.add(sph(0.055, ceramic, 1.98, 1.1, -0.1)); g.add(cyl(0.025, 0.045, 0.1, ceramicTerra, 1.98, 0.97, -0.1, 14));
+      g.add(box(0.2, 0.24, 0.16, matCoir, 2.12, 1.04, -0.11, nc));
+      // nicho médio esquerdo (33): planta de folhas
+      g.add(cyl(0.065, 0.05, 0.1, potM, 0.185, 1.77, -0.1, 14));
+      for (let k = 0; k < 9; k++) { const a = k * 2.4; const l = sph(1, k % 2 ? leafA : leafB, 0.185 + Math.cos(a) * 0.05, 1.93 + (k % 4) * 0.045, -0.1 + Math.sin(a) * 0.05); l.scale.set(0.05, 0.02, 0.085); l.rotation.set(0.5, -a, Math.cos(a) * 0.6); l.castShadow = false; g.add(l); }
+      // nicho médio largo (163, aberto até o split): livros deitados e quadrinho encostado
+      books(g, 0.62, 1.72, -0.10, [[0.3, 0.045, 0.2, book4], [0.27, 0.04, 0.19, bookBlk], [0.25, 0.03, 0.18, book3]]);
+      g.add(cyl(0.04, 0.05, 0.11, ceramicTerra, 0.95, 1.775, -0.1, 14));
+      const pr = G(); pr.add(box(0.2, 0.26, 0.015, frameW, 0, 0.13, 0, nc)); pr.add(box(0.15, 0.21, 0.006, artMat(art0), 0, 0.13, 0.009, nc));
+      pr.position.set(0.3, 1.72, -0.06); pr.rotation.x = -0.16; g.add(pr);
+      // nicho alto esquerdo (154): bandeja, tigelas e vaso
+      g.add(box(0.36, 0.012, 0.15, dourado, 0.4, 2.176, -0.11, nc)); g.add(cyl(0.07, 0.04, 0.05, ceramic, 0.3, 2.215, -0.11, 18)); g.add(cyl(0.05, 0.03, 0.04, ceramicBg, 0.5, 2.21, -0.11, 18));
+      g.add(cyl(0.05, 0.065, 0.22, ceramicBg, 1.05, 2.28, -0.1, 16)); vaseDry(g, 1.05, 2.39, -0.1, 0.4, ceramicBg);
+    }
+    solid(6.45, 4.26, 6.66, 6.53);
+  }
+
+  // ===========================================================================================
+  // BUFFET B — móvel solto 219 × 40 × 85 (x 1,22–3,41 · z 6,76–7,16), Gianduia, frente para +z
+  // Grupo local: x local = mundo − 1,22; z local 0 = plano das portas (mundo z 7,16), corpo para −z.
+  // ===========================================================================================
+  {
+    const g = G(); place(g, 1.22, 7.16, 0, 0);
+    const BW = 2.19, BD = 0.40;
+    for (const [lx, lz] of [[0.09, -0.07], [BW - 0.09, -0.07], [0.09, -BD + 0.07], [BW - 0.09, -BD + 0.07]]) {   // pés dourados de 10 cm, levemente cônicos
+      g.add(cyl(0.012, 0.007, 0.10, dourado, lx, 0.05, lz, 8));
+    }
+    L(g, gianDk, 0.01, BW - 0.01, 0.10, 0.12, -BD + 0.01, -0.01);                         // fundo do móvel
+    L(g, gianduia, 0, 0.02, 0.10, 0.83, -BD, -0.018); L(g, gianduia, BW - 0.02, BW, 0.10, 0.83, -BD, -0.018);
+    for (let i = 1; i < 5; i++) L(g, gianduia, i * 0.44 - 0.01 - 0.002, i * 0.44 + 0.01, 0.12, 0.83, -BD, -0.018);  // divisórias
+    L(g, gianDk, 0.02, BW - 0.02, 0.12, 0.83, -BD, -BD + 0.012, nc);                      // fundo
+    L(g, gianduia, 0, BW, 0.10, 0.12, -BD, -0.018);                                       // fundo do móvel (base)
+    L(g, gianduia, 0, BW, 0.465, 0.485, -BD, -0.03);                                      // prateleira (37|37)
+    L(g, gianduia, -0.004, BW + 0.004, 0.83, 0.85, -BD - 0.004, 0.004);                   // tampo
+    for (let i = 0; i < 5; i++) doorRR(g, gianduia, palhinha, i * 0.44 + 0.002, (i + 1) * 0.44 - 0.002, 0.1225, 0.8275, 0, 0.018, 0.05, 0.075, 0.035);
+    // objetos sobre o buffet (y 0,85) — um pouco acima do encosto do sofá
+    {
+      const y = 0.85;
+      // abajur de cerâmica com cúpula de linho
+      g.add(cyl(0.065, 0.085, 0.24, ceramicBg, 0.30, y + 0.12, -0.2, 18)); g.add(sph(0.075, ceramicBg, 0.30, y + 0.27, -0.2));
+      g.add(cyl(0.01, 0.01, 0.12, dourado, 0.30, y + 0.38, -0.2, 8));
+      g.add(cyl(0.12, 0.17, 0.22, shadeLamp, 0.30, y + 0.47, -0.2, 22, true)).castShadow = false;
+      // pilha de livros com bola dourada + vaso de ramos secos
+      books(g, 0.88, y, -0.2, [[0.30, 0.045, 0.21, book3], [0.27, 0.04, 0.2, book1], [0.24, 0.032, 0.19, book4]]); g.add(sph(0.045, dourado, 0.88, y + 0.162, -0.2));
+      g.add(cyl(0.07, 0.09, 0.34, ceramicDk, 1.30, y + 0.17, -0.2, 18)); vaseDry(g, 1.30, y + 0.34, -0.2, 0.75, ceramicDk);
+      // bandeja dourada com garrafa e copos
+      g.add(cyl(0.14, 0.14, 0.012, dourado, 1.80, y + 0.006, -0.2, 28)); g.add(cyl(0.032, 0.038, 0.24, glassM, 1.76, y + 0.132, -0.2, 14));
+      g.add(cyl(0.028, 0.022, 0.07, glassM, 1.88, y + 0.047, -0.15, 12)); g.add(cyl(0.028, 0.022, 0.07, glassM, 1.88, y + 0.047, -0.25, 12));
+      // escultura pequena
+      g.add(sph(0.06, ceramic, 2.07, y + 0.07, -0.2)); g.add(cyl(0.04, 0.05, 0.03, ceramicDk, 2.07, y + 0.015, -0.2, 14));
+    }
+  }
+
+  // ===========================================================================================
+  // SOFÁ 3 LUGARES — 2,16 × 0,81, centro (2,30; 6,34), encosto no buffet (z maior), virado para a TV (−z)
+  // ===========================================================================================
+  {
+    const g = G(); place(g, 2.30, 6.335, PI, 0);              // frente (+z local) → −z mundo
+    const SW = 2.16, SD = 0.81, hz = SD / 2;
+    for (const [lx, lz] of [[-1.0, -0.33], [1.0, -0.33], [-1.0, 0.33], [1.0, 0.33]]) g.add(cyl(0.022, 0.016, 0.08, dourado, lx, 0.04, lz, 10));
+    cush(g, sofaDk, SW, 0.15, SD, 0, 0.155, 0, 0.02);                                     // base (plinto) y 0,08–0,23
+    cush(g, sofaM, SW, 0.62, 0.20, 0, 0.55, -hz + 0.10, 0.05);                            // encosto (y 0,24–0,86)
+    for (const sx of [-1, 1]) cush(g, sofaM, 0.17, 0.42, SD, sx * (SW / 2 - 0.085), 0.43, 0, 0.05);   // braços (até y 0,64)
+    const iw = SW - 0.34, cw = iw / 3;
+    for (let i = 0; i < 3; i++) {
+      const cx = -iw / 2 + cw * (i + 0.5);
+      cush(g, sofaLt, cw - 0.012, 0.17, 0.58, cx, 0.325, hz - 0.31, 0.05);                // assento (topo y 0,42)
+      cush(g, sofaLt, cw - 0.012, 0.44, 0.17, cx, 0.65, -hz + 0.30, 0.06, -0.2);          // encosto solto, inclinado
+    }
+    // almofadas e manta
+    cush(g, pillowSand, 0.42, 0.42, 0.13, -0.78, 0.62, -0.02, 0.05, -0.26, 0.28, 0.06);
+    cush(g, pillowTerra, 0.36, 0.36, 0.12, -0.55, 0.58, 0.0, 0.05, -0.28, -0.14, -0.04);
+    cush(g, sofaDk, 0.5, 0.26, 0.12, 0.78, 0.55, 0.0, 0.05, -0.24, -0.3, 0.05);
+    cush(g, pillowGray, 0.38, 0.38, 0.11, 0.6, 0.58, 0.04, 0.05, -0.28, 0.2, 0.0);
+    g.add(box(0.20, 0.03, 0.55, throwM, SW / 2 - 0.085, 0.655, 0.1, nc)); g.add(box(0.03, 0.22, 0.55, throwM, SW / 2 - 0.0, 0.55, 0.1, nc)); g.add(box(0.03, 0.2, 0.55, throwM, SW / 2 - 0.175, 0.55, 0.1, nc));
+    solid(1.22, 5.93, 3.38, 6.76);
+  }
+  solid(1.22, 6.76, 3.41, 7.16);
+
+  // ---- tapetes: sala (sob o sofá e à frente) e jantar -----------------------------------------------
+  W(rugEdge, 1.40, 3.30, 0.004, 0.012, 4.92, 6.38, nc);
+  W(rugField, 1.47, 3.23, 0.0125, 0.0135, 4.99, 6.31, nc);
+  W(rugLine, 1.51, 3.19, 0.0136, 0.0142, 5.03, 6.27, nc);
+  W(rugField2, 1.54, 3.16, 0.0143, 0.0148, 5.06, 6.24, nc);
+  W(rugDinE, 3.34, 5.99, 0.004, 0.010, 5.80, 7.62, nc);
+  W(rugDin, 3.39, 5.94, 0.0105, 0.0112, 5.85, 7.57, nc);
+  W(rugLine, 3.44, 5.89, 0.0113, 0.0118, 5.90, 7.52, nc);
+  W(rugDin, 3.46, 5.87, 0.0119, 0.0124, 5.92, 7.50, nc);
+
+  // ===========================================================================================
+  // MESA DE JANTAR 2,39 × 0,91 (x 3,44–5,83 · z 6,25–7,16) + 8 CADEIRAS
+  // ===========================================================================================
+  {
+    const g = G(); place(g, 4.635, 6.705, 0, 0);
+    const TW = 2.39, TD = 0.91;
+    g.add(box(TW, 0.04, TD, tableTop, 0, 0.73, 0));                                        // tampo (y 0,71–0,75)
+    g.add(box(TW - 0.04, 0.012, TD - 0.04, tableLeg, 0, 0.704, 0, nc));
+    g.add(box(TW - 0.30, 0.07, TD - 0.22, tableLeg, 0, 0.66, 0, nc));                       // travessa
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const leg = cyl(0.04, 0.028, 0.64, tableLeg, sx * (TW / 2 - 0.16), 0.32, sz * (TD / 2 - 0.12), 4); leg.rotation.y = PI / 4; g.add(leg);
+    }
+    // centro de mesa: tábua longa com vasos e velas
+    g.add(box(0.8, 0.02, 0.2, carvalho, 0, 0.76, 0, nc));
+    g.add(cyl(0.05, 0.065, 0.2, ceramicBg, -0.25, 0.87, 0, 16)); vaseDry(g, -0.25, 0.97, 0, 0.55, ceramicBg);
+    g.add(sph(0.065, ceramic, 0.05, 0.835, 0.02)); g.add(cyl(0.035, 0.045, 0.1, ceramicTerra, 0.28, 0.82, -0.02, 14));
+    g.add(cyl(0.02, 0.02, 0.1, ceramic, 0.38, 0.82, 0.04, 10));
+    solid(3.40, 6.02, 5.86, 7.42);
+  }
+  {
+    // cadeira de madeira clara com braços e assento estofado (frente +z local, origem no centro do assento)
+    const chair = () => {
+      const g = G();
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        if (sz > 0) g.add(cyl(0.017, 0.012, 0.45, chairWood, sx * 0.205, 0.225, sz * 0.205, 8));
+        else { const up = box(0.034, 0.82, 0.034, chairWood, sx * 0.205, 0.41, -0.215); up.rotation.x = -0.07; g.add(up); }
+      }
+      g.add(box(0.44, 0.04, 0.44, chairWood, 0, 0.395, 0, nc));                              // travessa do assento
+      g.add(box(0.42, 0.055, 0.42, chairSeat, 0, 0.4425 + 0.0, 0.0));                         // assento estofado (topo y 0,47)
+      g.add(box(0.41, 0.04, 0.02, chairWood, 0, 0.14, 0.205, nc)); g.add(box(0.02, 0.04, 0.41, chairWood, 0.205, 0.14, 0, nc)); g.add(box(0.02, 0.04, 0.41, chairWood, -0.205, 0.14, 0, nc));
+      // encosto curvo: trilho superior em arco (5 segmentos) + 2 ripas
+      for (let i = 0; i < 5; i++) {
+        const a = (i - 2) * 0.32, cx = Math.sin(a) * 0.23, cz = -0.215 + (1 - Math.cos(a)) * 0.12;
+        const seg = box(0.11, 0.07, 0.03, chairWood, cx, 0.78, cz); seg.rotation.y = -a; g.add(seg);
+      }
+      g.add(box(0.045, 0.2, 0.022, chairWood, -0.07, 0.61, -0.215, nc)); g.add(box(0.045, 0.2, 0.022, chairWood, 0.07, 0.61, -0.215, nc));
+      g.add(box(0.36, 0.1, 0.03, chairSeat, 0, 0.6, -0.2, nc));                               // encosto estofado baixo
+      for (const sx of [-1, 1]) {                                                              // braços
+        g.add(box(0.03, 0.03, 0.4, chairWood, sx * 0.225, 0.64, -0.01, nc));
+        g.add(box(0.026, 0.2, 0.026, chairWood, sx * 0.225, 0.54, 0.15, nc));
+      }
+      return g;
+    };
+    const cxs = [3.74, 4.33, 4.92, 5.52];
+    for (const cx of cxs) {
+      place(chair(), cx, 6.29, 0, 0);       // fileira norte, olhando para +z (a mesa)
+      place(chair(), cx, 7.12, PI, 0);      // fileira sul, olhando para −z
+    }
+  }
+
+  // ---- pendentes dourados sobre a mesa (3 × cúpula + cabo; a luz é do cartão) ------------------------
+  {
+    const dome = new THREE.LatheGeometry([[0.0, 0.0], [0.05, 0.002], [0.1, 0.022], [0.145, 0.07], [0.17, 0.125], [0.17, 0.135]].map(([r, y]) => new THREE.Vector2(r, y)), 28);
+    const domeGold = std({ color: 0xc9a66b, roughness: 0.3, metalness: 0.85, side: THREE.DoubleSide });
+    for (const px of [3.90, 4.60, 5.30]) {
+      put(cyl(0.004, 0.004, 0.68, ceramicDk, px, 2.16, 6.70, 6));                          // cabo
+      put(cyl(0.05, 0.05, 0.02, dourado, px, 2.49, 6.70, 14));                              // canopla no forro
+      put(cyl(0.02, 0.02, 0.1, dourado, px, 1.87, 6.70, 10));                               // pescoço
+      const sh = mesh(dome, domeGold, px, 1.825, 6.70, true); sh.rotation.x = PI; put(sh);   // boca para baixo (rebordo em y 1,69)
+      const inner = mesh(dome, domeInSala, px, 1.825, 6.70, false); inner.rotation.x = PI; inner.scale.setScalar(0.985); put(inner);
+      put(sph(0.04, bulbSala, px, 1.78, 6.70)).castShadow = false;
+    }
+  }
+
+  // ---- cortina da porta de vidro da sala (x ≈ 1,10 · z 4,44–7,93): linho em pregas + voal + trilho ----
+  {
+    const yB = 0.02, yT = 2.46;
+    W(railM, 1.093, 1.20, yT, 2.5, 4.40, 7.95, nc);                                       // trilho no forro
+    W(sheer, 1.100, 1.106, yB, yT, 4.46, 7.92, nc);
+    pleats(curtainM, 'z', 4.46, 5.28, 1.115, 0.06, yB, yT, 18);                            // folha recolhida junto ao painel
+    pleats(curtainM, 'z', 7.00, 7.92, 1.115, 0.06, yB, yT, 20);                            // folha recolhida junto à cozinha
+    W(curtainM2, 1.105, 1.185, yT - 0.04, yT + 0.002, 4.46, 5.28, nc); W(curtainM2, 1.105, 1.185, yT - 0.04, yT + 0.002, 7.00, 7.92, nc);   // cabeçote
+  }
+
+  // ===========================================================================================
+  // HALL DE ENTRADA (x 6,76–8,44 · z 6,53–7,59)
+  // ===========================================================================================
+  {
+    // aparador estreito (prof. 0,23) na parede norte, deixando o giro da porta de entrada livre
+    const X0 = 6.96, X1 = 7.56, Z0 = 6.535, Z1 = 6.765;
+    W(carvalho, X0, X1, 0.76, 0.80, Z0, Z1);                                               // tampo
+    W(carvalho, X0 + 0.01, X1 - 0.01, 0.62, 0.76, Z0 + 0.01, Z1 - 0.03);                    // gaveta
+    W(freijo, X0 + 0.014, X1 - 0.014, 0.625, 0.755, Z1 - 0.03, Z1 - 0.012);                 // frente
+    W(dourado, (X0 + X1) / 2 - 0.07, (X0 + X1) / 2 + 0.07, 0.69, 0.702, Z1 - 0.008, Z1 - 0.002, nc);
+    for (const lx of [X0 + 0.035, X1 - 0.035]) for (const lz of [Z0 + 0.025, Z1 - 0.025]) W(dourado, lx - 0.012, lx + 0.012, 0, 0.62, lz - 0.012, lz + 0.012, nc);   // pés
+    W(carvalho, X0 + 0.02, X1 - 0.02, 0.18, 0.2, Z0 + 0.02, Z1 - 0.02, nc);                  // prateleira baixa
+    // objetos: abajur, bandeja de chaves, vaso
+    put(cyl(0.04, 0.055, 0.17, ceramicBg, 7.12, 0.885, 6.65, 16)); put(cyl(0.008, 0.008, 0.08, dourado, 7.12, 1.01, 6.65, 8));
+    put(cyl(0.085, 0.12, 0.16, lampShadeHall, 7.12, 1.12, 6.65, 20, true)).castShadow = false;
+    W(dourado, 7.27, 7.44, 0.80, 0.812, 6.58, 6.70, nc); put(sph(0.022, dourado, 7.33, 0.835, 6.64));
+    put(cyl(0.035, 0.045, 0.1, ceramicTerra, 7.50, 0.85, 6.60, 14));
+    put(sph(0.045, ceramic, 7.015, 0.845, 6.60));
+    // prateleira inferior: cesto
+    put(box(0.26, 0.14, 0.17, matCoir, 7.2, 0.27, 6.65, nc));
+    solid(X0, Z0, X1, Z1);
+    // espelho em arco (estádio) sobre o aparador
+    {
+      const mx = 7.26, mz = 6.53;
+      const g = G(); place(g, mx, mz, FZ, 0);
+      g.add(box(0.60, 0.80, 0.02, dourado, 0, 1.46, 0.01, nc));
+      const ca = cyl(0.30, 0.30, 0.02, dourado, 0, 1.86, 0.01, 28); ca.rotation.x = PI / 2; ca.castShadow = false; g.add(ca);
+      g.add(box(0.54, 0.80, 0.008, espelho, 0, 1.46, 0.024, nc));
+      const cb = cyl(0.27, 0.27, 0.008, espelho, 0, 1.86, 0.024, 28); cb.rotation.x = PI / 2; cb.castShadow = false; g.add(cb);
+    }
+    // quadro na parede sul (x ≈ 8,0), de frente para o norte — fora do arco da folha da porta
+    picture(8.0, 1.25, 7.59, FNZ, 0.62, 0.62, art2, frameG);
+    // capacho de fibra diante da porta de entrada (x 8,49), sobre o piso
+    W(matCoirE, 7.84, 8.40, 0.004, 0.012, 6.76, 7.34, nc);
+    W(matCoir, 7.865, 8.375, 0.0125, 0.0135, 6.785, 7.315, nc);
+    for (let k = 0; k < 6; k++) W(matCoirE, 7.89 + k * 0.08, 7.90 + k * 0.08, 0.0136, 0.0142, 6.80, 7.30, nc);
+  }
+}
+
+function roomCozinhaServico(ctx) {
+  // ---------------------------------------------------------------------------
+  // COZINHA LINEAR (parede sul, x 1,09–6,66 · frente z 7,98–8,18 · fundo z 8,83), VARANDA (x 0,17–1,05 · z 0,23–7,94)
+  // e ÁREA DE SERVIÇO (x 0,17–0,86 · z 7,94–8,59). Fonte: MARCENARIA vista A (MDF Gianduia), MARMORARIA (granito São
+  // Gabriel escovado 4,20 × 0,65 + rodamão 0,70), MOBILIÁRIO (eletros 1–7), LAYOUT (varanda / máquina).
+  // Da esquerda (x menor) para a direita: torre 52 · nicho da geladeira 85 · bancada 420 (lava-louça 51, portas 42/43/43/43,
+  // gaveteiro 60, lavadora 66, armário 73). Superiores 1,60–2,45 (+5 de tampo): 2 portas sobre a geladeira (y 1,93–2,45),
+  // coluna dos nichos (Freijó aberto + micro-ondas) x 2,47–3,04 e 8 portas de 45 até x 6,66; coifa embutida sobre o cooktop.
+  // Piso, paredes, vidros e guarda-corpo são do cartão. Colisores do modo Pessoa: ctx.solid(x0,z0,x1,z1,h) quando o cartão
+  // oferecer (chamada protegida).
+  // ---------------------------------------------------------------------------
+  const THREE = ctx.THREE, M = ctx.M;
+  const box = (...a) => ctx.box(...a), cyl = (...a) => ctx.cyl(...a), sph = (...a) => ctx.sph(...a);
+  const std = (o) => ctx.std(o), rnd = () => ctx.rnd();
+  const put = (m) => { ctx.add(m); return m; };
+  const nc = { cast: false };
+  const solid = (x0, z0, x1, z1, h = 1) => { if (typeof ctx.solid === 'function') ctx.solid(x0, z0, x1, z1, h); };
+  // caixa por limites (x0,x1,y0,y1,z0,z1)
+  const bx = (x0, x1, y0, y1, z0, z1, mat, o) => put(box(x1 - x0, y1 - y0, z1 - z0, mat, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, o));
+  // cilindro com eixo em x ('x'), y ('y') ou z ('z')
+  const cy = (r0, r1, len, mat, x, y, z, axis = 'y', seg = 16, o = {}) => {
+    const m = cyl(r0, r1, len, mat, x, y, z, seg);
+    if (axis === 'x') m.rotation.z = Math.PI / 2; else if (axis === 'z') m.rotation.x = Math.PI / 2;
+    if (o.cast === false) m.castShadow = false;
+    return put(m);
+  };
+
+  // ------------------------------------------------------------ materiais
+  const gian = M.gianduia || std({ color: 0xb4a58f, roughness: 0.3 });
+  const frape = M.frape || std({ color: 0xcfc6b8, roughness: 0.6 });
+  const freijo = M.freijo || std({ color: 0xd6b27a, roughness: 0.6 });
+  const carv = M.carvalho || std({ color: 0xcaa874, roughness: 0.65 });
+  const gran = M.granitoPreto || std({ color: 0x2b2b2e, roughness: 0.55 });
+  const pedra = M.pedraClara || std({ color: 0xd8cdb8, roughness: 0.4 });
+  const dour = M.dourado || std({ color: 0xc9a86a, roughness: 0.3, metalness: 0.85 });
+  const inox = M.inox || std({ color: 0xc4c7ca, roughness: 0.3, metalness: 0.9 });
+  const linho = M.linho || std({ color: 0xe6dfd0, roughness: 1 });
+  const plinth = std({ color: 0x4a443b, roughness: 0.8 });                          // rodapé escuro recuado
+  const inner = std({ color: 0xcdc3b3, roughness: 0.7 });                           // interior dos módulos
+  const ceramic = std({ color: 0xf6f5f1, roughness: 0.2 });                         // louça (cuba branca)
+  const blackApp = std({ color: 0x151517, roughness: 0.35, metalness: 0.4 });       // eletro preto
+  const steelDark = std({ color: 0x41444a, roughness: 0.35, metalness: 0.8 });      // lavadora inox escuro
+  const glassDk = std({ color: 0x0b1118, roughness: 0.08, metalness: 0.6 });        // vidro escuro (porta da lavadora)
+  const chrome = std({ color: 0xd9dcdf, roughness: 0.15, metalness: 1 });
+  const micro = std({ color: 0xa9adb2, roughness: 0.12, metalness: 0.9 });          // micro-ondas cinza espelhado
+  const leaf = [std({ color: 0x3b6b36, roughness: 0.9 }), std({ color: 0x4d7f43, roughness: 0.9 }), std({ color: 0x2d5a30, roughness: 0.9 })];
+  const potTerra = std({ color: 0xb8764f, roughness: 0.9 });
+  const potCream = std({ color: 0xe3dccd, roughness: 0.8 });
+  const potDark = std({ color: 0x35332f, roughness: 0.7 });
+  const soil = std({ color: 0x2b211a, roughness: 1 });
+  const rattan = std({ color: 0xc9a46a, roughness: 0.95 });
+  const white = std({ color: 0xf2f0ea, roughness: 0.5 });
+  const plastic = [0x4b7fb5, 0xd8a53a, 0x6aa27a, 0xe9e5da].map((c) => std({ color: c, roughness: 0.4 }));
+  const board = std({ color: 0xb78d5a, roughness: 0.7 });
+
+  // ------------------------------------------------------------ utilidades
+  // Planta em vaso (figueira / folhagem): vaso cônico + tronco + tufos de esferas achatadas
+  const plant = (x, z, s = 1, potMat = potTerra, h = 0.9, n = 7) => {
+    cy(0.14 * s, 0.1 * s, 0.26 * s, potMat, x, 0.13 * s, z);
+    cy(0.125 * s, 0.125 * s, 0.02, soil, x, 0.265 * s, z, 'y', 12, nc);
+    cy(0.012, 0.018, h * 0.7, std({ color: 0x5b4632, roughness: 1 }), x, 0.26 * s + h * 0.35, z, 'y', 6);
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * Math.PI * 2, r = (0.05 + rnd() * 0.13) * s, y = 0.26 * s + h * (0.45 + rnd() * 0.55);
+      const rr = (0.09 + rnd() * 0.07) * s;
+      // folhas não atravessam o peitoril/guarda-corpo (x 0,17) nem o vidro da sala (x 1,02)
+      const lx = Math.min(Math.max(x + Math.cos(a) * r, 0.18 + rr), 1.0 - rr);
+      const m = sph(rr, leaf[i % 3], lx, y, z + Math.sin(a) * r);
+      m.scale.set(1, 0.7 + rnd() * 0.3, 1); put(m);
+    }
+    solid(x - 0.13 * s, z - 0.13 * s, x + 0.13 * s, z + 0.13 * s, 1);   // só o vaso: a varanda (0,85 m) continua passável
+  };
+  // Torneira alta (pescoço de ganso) fixa na bancada ou na parede; sai para -z (frente da cozinha)
+  const gooseneck = (x, y, z, mat, h = 0.28, reach = 0.16) => {
+    cy(0.012, 0.014, h, mat, x, y + h / 2, z, 'y', 10, nc);
+    cy(0.009, 0.009, reach, mat, x, y + h, z - reach / 2, 'z', 8, nc);
+    cy(0.011, 0.007, 0.05, mat, x, y + h - 0.025, z - reach, 'y', 8, nc);
+    bx(x - 0.003, x + 0.003, y + h + 0.01, y + h + 0.05, z + 0.0, z + 0.004, mat, nc);    // alavanca
+  };
+  // Pia/cuba embutida: aro, quatro paredes e fundo; rim 1 cm acima do tampo
+  const basin = (cx, cz, w, d, yTop, mat, depth = 0.2, wall = 0.012) => {
+    bx(cx - w / 2 - 0.012, cx + w / 2 + 0.012, yTop, yTop + 0.01, cz - d / 2 - 0.012, cz - d / 2, mat, nc);
+    bx(cx - w / 2 - 0.012, cx + w / 2 + 0.012, yTop, yTop + 0.01, cz + d / 2, cz + d / 2 + 0.012, mat, nc);
+    bx(cx - w / 2 - 0.012, cx - w / 2, yTop, yTop + 0.01, cz - d / 2, cz + d / 2, mat, nc);
+    bx(cx + w / 2, cx + w / 2 + 0.012, yTop, yTop + 0.01, cz - d / 2, cz + d / 2, mat, nc);
+    bx(cx - w / 2, cx + w / 2, yTop - depth, yTop - depth + wall, cz - d / 2, cz + d / 2, mat, nc);           // fundo
+    bx(cx - w / 2, cx - w / 2 + wall, yTop - depth, yTop, cz - d / 2, cz + d / 2, mat, nc);
+    bx(cx + w / 2 - wall, cx + w / 2, yTop - depth, yTop, cz - d / 2, cz + d / 2, mat, nc);
+    bx(cx - w / 2, cx + w / 2, yTop - depth, yTop, cz - d / 2, cz - d / 2 + wall, mat, nc);
+    bx(cx - w / 2, cx + w / 2, yTop - depth, yTop, cz + d / 2 - wall, cz + d / 2, mat, nc);
+    cy(0.02, 0.02, 0.004, chrome, cx, yTop - depth + wall + 0.002, cz, 'y', 12, nc);                         // ralo
+  };
+  // Tampo de pedra com furos retangulares [cx, cz, w, d]: recorta em faixas
+  const slab = (x0, x1, z0, z1, y0, y1, mat, holes = []) => {
+    const hs = holes.map(([cx, cz, w, d]) => [cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2]).sort((a, b) => a[0] - b[0]);
+    let cur = x0;
+    for (const [a, b, c, e] of hs) {
+      if (a > cur) bx(cur, a, y0, y1, z0, z1, mat);
+      bx(a, b, y0, y1, z0, c, mat); bx(a, b, y0, y1, e, z1, mat);
+      cur = b;
+    }
+    if (x1 > cur) bx(cur, x1, y0, y1, z0, z1, mat);
+  };
+
+  // =========================================================================
+  // COZINHA
+  // =========================================================================
+  const ZB = 8.83;                      // face interna da parede sul
+  const ZF = 8.22;                      // frente das portas da base (granito avança até 8,18)
+  const YB = 0.88;                      // topo do corpo da base (granito de 2 cm sobe a 0,90)
+  const DG = 0.003;                     // folga entre portas
+
+  // ---------- Torre 52 × 30 × 250 (x 1,09–1,61 · z 7,98–8,28), porta inteira
+  bx(1.09, 1.61, 0.10, 2.50, 7.98, 8.28, gian);
+  bx(1.10, 1.60, 0.0, 0.10, 8.01, 8.28, plinth, nc);
+  bx(1.095, 1.605, 0.105, 2.495, 7.965, 7.98, gian);                              // folha da porta
+  bx(1.09, 1.61, 0.10, 0.1015, 7.96, 7.98, plinth, nc);
+  bx(1.565, 1.575, 1.0, 1.55, 7.945, 7.965, dour, nc);                             // puxador vertical embutido (a definir)
+  solid(1.09, 7.98, 1.61, 8.28, 2.5);
+
+  // ---------- Nicho da geladeira (x 1,61–2,46): laterais e fundo de Gianduia
+  bx(1.61, 1.63, 0.10, 1.93, 8.14, ZB, gian);
+  bx(2.44, 2.46, 0.10, 1.93, 8.14, ZB, gian);
+  bx(1.63, 2.44, 0.0, 1.93, ZB - 0.02, ZB, inner, nc);
+  // Geladeira French Door 69,9 × 189 × 74,5 inox (x 1,71–2,41 · z 8,14–8,82)
+  {
+    const fx0 = 1.71, fx1 = 2.41, fz0 = 8.14, fz1 = 8.82, H = 1.89, cxm = (fx0 + fx1) / 2;
+    bx(fx0, fx1, 0.06, H, fz0 + 0.02, fz1, inox);                                  // corpo
+    bx(fx0 + 0.01, fx1 - 0.01, 0.0, 0.06, fz0 + 0.05, fz1 - 0.05, plinth, nc);
+    // gaveta do freezer (embaixo) e duas portas de cima
+    bx(fx0, fx1, 0.07, 0.62, fz0, fz0 + 0.02, inox);
+    bx(fx0, cxm - 0.002, 0.635, H, fz0, fz0 + 0.02, inox);
+    bx(cxm + 0.002, fx1, 0.635, H, fz0, fz0 + 0.02, inox);
+    bx(fx0 + 0.04, fx1 - 0.04, 0.5, 0.52, fz0 - 0.03, fz0, chrome, nc);            // puxador horizontal do freezer
+    bx(cxm - 0.045, cxm - 0.035, 0.7, 1.55, fz0 - 0.025, fz0, chrome, nc);          // puxadores verticais
+    bx(cxm + 0.035, cxm + 0.045, 0.7, 1.55, fz0 - 0.025, fz0, chrome, nc);
+    bx(fx0 + 0.07, cxm - 0.09, 1.2, 1.5, fz0 - 0.004, fz0 + 0.001, blackApp, nc);  // painel/dispenser escuro
+    bx(fx0 + 0.09, cxm - 0.11, 1.38, 1.4, fz0 - 0.006, fz0 - 0.004, std({ color: 0x7fb4d6, emissive: 0x2a5a78, emissiveIntensity: 0.4 }), nc);
+    solid(fx0, fz0, fx1, fz1, H);
+  }
+
+  // ---------- Base 4,20 m (x 2,45–6,65): corpo, rodapé, portas
+  const BX0 = 2.45, BX1 = 6.65;
+  bx(BX0, BX1, 0.0, 0.10, ZF + 0.03, ZB - 0.02, plinth, nc);                       // rodapé recuado 3 cm
+  bx(BX0, BX1, 0.10, YB, ZB - 0.02, ZB, inner, nc);                                // fundo
+  // módulos (x0, x1) da esquerda p/ direita
+  const mods = { lava: [2.45, 2.96], port: [2.96, 4.67], gav: [4.67, 5.27], maq: [5.27, 5.93], arm: [5.93, 6.65] };
+  const sideP = (x) => bx(x - 0.009, x + 0.009, 0.10, YB, ZF, ZB - 0.02, gian);
+  [2.45, 2.96, 4.67, 5.27, 5.93, 6.65].forEach((x) => sideP(Math.min(Math.max(x, BX0 + 0.009), BX1 - 0.009)));
+  bx(BX0, BX1, YB - 0.02, YB, ZF, ZB, gian, nc);                                   // travessa sob o tampo
+  // porta lisa de Gianduia (corre y0–y1) + puxador-perfil dourado na borda superior
+  const doorL = (x0, x1, y0, y1, withHandle = true, top = true) => {
+    bx(x0 + DG, x1 - DG, y0, y1, ZF - 0.018, ZF, gian);
+    if (withHandle) {
+      const w = Math.min(0.36, (x1 - x0) * 0.7), cx = (x0 + x1) / 2;
+      bx(cx - w / 2, cx + w / 2, (top ? y1 - 0.03 : y0 + 0.015), (top ? y1 - 0.018 : y0 + 0.027), ZF - 0.026, ZF - 0.018, dour, nc);
+    }
+  };
+  // portas da base: 42 / 43 / 43 / 43 (78 de altura: y 0,10–0,88)
+  [[2.96, 3.38], [3.38, 3.81], [3.81, 4.24], [4.24, 4.67]].forEach(([a, b]) => doorL(a, b, 0.10, YB));
+  // armário 73 sob o tanque: duas portas empilhadas 39/39
+  doorL(5.93, 6.65, 0.10, 0.49); doorL(5.93, 6.65, 0.50, YB);
+  // gaveteiro 60: gaveta de 27 embaixo e três de 17
+  doorL(4.67, 5.27, 0.10, 0.37);
+  doorL(4.67, 5.27, 0.375, 0.545); doorL(4.67, 5.27, 0.55, 0.715); doorL(4.67, 5.27, 0.72, YB);
+  // lava-louça nº5: inox 44,8 × 84,5 × 60 (x 2,48–2,93)
+  {
+    bx(2.48, 2.93, 0.0, 0.10, ZF + 0.03, ZB - 0.02, plinth, nc);
+    bx(2.48, 2.93, 0.10, 0.845, ZF - 0.02, ZB - 0.02, inox);
+    bx(2.50, 2.91, 0.74, 0.84, ZF - 0.026, ZF - 0.02, blackApp, nc);                // painel de comandos
+    bx(2.53, 2.88, 0.715, 0.725, ZF - 0.04, ZF - 0.026, chrome, nc);                // barra de puxar
+    for (let i = 0; i < 4; i++) bx(2.55 + i * 0.1, 2.57 + i * 0.1, 0.78, 0.80, ZF - 0.029, ZF - 0.026, std({ color: 0x9ad0ff, emissive: 0x2a5a8a, emissiveIntensity: 0.5 }), nc);
+    bx(2.93, 2.96, 0.10, YB, ZF, ZB - 0.02, gian);
+  }
+  // lavadora nº4: 60 × 85 × 55 (x 5,30–5,90), frente em 8,20
+  {
+    bx(5.30, 5.90, 0.03, 0.88, 8.20, 8.75, steelDark);
+    bx(5.30, 5.90, 0.0, 0.03, 8.24, 8.72, plinth, nc);
+    bx(5.30, 5.90, 0.76, 0.865, 8.185, 8.20, blackApp, nc);                          // painel superior
+    bx(5.36, 5.50, 0.81, 0.83, 8.18, 8.185, std({ color: 0x9ad0ff, emissive: 0x2a5a8a, emissiveIntensity: 0.6 }), nc);   // display
+    cy(0.04, 0.04, 0.012, chrome, 5.78, 0.815, 8.18, 'z', 14, nc);                   // botão
+    cy(0.235, 0.235, 0.02, steelDark, 5.60, 0.40, 8.19, 'z', 28);                    // aro da porta
+    cy(0.19, 0.19, 0.03, glassDk, 5.60, 0.40, 8.185, 'z', 28);                       // vidro
+    cy(0.1, 0.1, 0.012, std({ color: 0x1f3a5a, roughness: 0.1, metalness: 0.7 }), 5.60, 0.40, 8.168, 'z', 20, nc);
+  }
+
+  // ---------- Tampo de granito São Gabriel 420 × 65 (y 0,88–0,90), cuba e tanque; rodamão 2 cm × 0,70
+  const CUBA = [3.31, 8.50, 0.56, 0.36], TANQ = [6.27, 8.50, 0.50, 0.41];
+  slab(BX0, BX1, 8.18, ZB, YB, 0.90, gran, [[CUBA[0], CUBA[1], CUBA[2], CUBA[3]], [TANQ[0], TANQ[1], TANQ[2], TANQ[3]]]);
+  bx(BX0, BX1, 0.90, 1.60, ZB - 0.02, ZB, gran);                                      // rodamão (frontão) até 1,60
+  basin(CUBA[0], CUBA[1], CUBA[2], CUBA[3], 0.90, ceramic, 0.18);
+  basin(TANQ[0], TANQ[1], TANQ[2], TANQ[3], 0.90, inox, 0.16);
+  for (let i = 0; i < 6; i++) bx(TANQ[0] - 0.2, TANQ[0] + 0.2, 0.745, 0.749, TANQ[1] - 0.15 + i * 0.05, TANQ[1] - 0.13 + i * 0.05, inox, nc);   // tábua de lavar
+  gooseneck(CUBA[0], 0.90, ZB - 0.07, dour, 0.30, 0.17);
+  gooseneck(TANQ[0], 0.90, ZB - 0.07, chrome, 0.30, 0.17);
+  solid(BX0, 8.18, BX1, ZB, 0.9);
+
+  // ---------- Cooktop nº2 Electrolux 4 bocas (60 × 10 × 52): x 3,94–4,53 · z 8,30–8,82
+  {
+    const cx = 4.235, cz = 8.56;
+    bx(3.94, 4.53, 0.90, 0.925, 8.30, 8.82, inox);
+    [[-0.14, -0.12], [0.14, -0.12], [-0.14, 0.12], [0.14, 0.12]].forEach(([dx, dz], i) => {
+      const big = i === 1;
+      cy(big ? 0.052 : 0.04, big ? 0.052 : 0.04, 0.014, blackApp, cx + dx, 0.932, cz + dz, 'y', 18, nc);
+      cy(big ? 0.03 : 0.022, big ? 0.03 : 0.022, 0.018, chrome, cx + dx, 0.94, cz + dz, 'y', 12, nc);
+    });
+    // grelhas pretas em ferro
+    for (const dx of [-0.14, 0.14]) bx(cx + dx - 0.12, cx + dx + 0.12, 0.945, 0.955, cz - 0.255, cz - 0.245, blackApp, nc);
+    for (const dz of [-0.12, 0.12]) { bx(cx - 0.285, cx + 0.285, 0.945, 0.955, cz + dz - 0.005, cz + dz + 0.005, blackApp, nc); }
+    for (let i = 0; i < 4; i++) cy(0.016, 0.016, 0.02, blackApp, 3.99 + i * 0.1 + 0.075, 0.915, 8.295, 'z', 10, nc);   // manoplas
+    // panela inox sobre a boca grande
+    cy(0.095, 0.085, 0.11, inox, cx + 0.14, 1.0, cz - 0.12, 'y', 20);
+    bx(cx + 0.14 + 0.09, cx + 0.14 + 0.2, 1.045, 1.06, cz - 0.125, cz - 0.115, blackApp, nc);
+  }
+
+  // ---------- Itens de bancada
+  // purificador nº3 Everest Fit (31 × 28 × 37) em x 5,30–5,61 · z 8,55–8,80
+  bx(5.30, 5.61, 0.90, 1.27, 8.55, 8.80, blackApp);
+  bx(5.32, 5.59, 1.0, 1.10, 8.535, 8.55, steelDark, nc);
+  cy(0.008, 0.008, 0.05, chrome, 5.455, 0.99, 8.52, 'y', 8, nc);
+  // tábua de corte encostada no rodamão, fruteira/tigelas, garrafas e porta-utensílios
+  { const m = box(0.34, 0.02, 0.24, board, 4.88, 1.02, 8.77); m.rotation.x = -1.2; put(m); }   // tábua encostada no rodamão
+  cy(0.11, 0.075, 0.07, ceramic, 4.82, 0.935, 8.58, 'y', 18);                          // tigela branca
+  for (let i = 0; i < 3; i++) { const f = sph(0.032, std({ color: [0xd8a23a, 0x8aa63a, 0xc6513a][i], roughness: 0.6 }), 4.79 + i * 0.03, 0.99, 8.58 + (i % 2) * 0.02); put(f); }
+  cy(0.025, 0.025, 0.22, std({ color: 0x4a6b2f, roughness: 0.2 }), 4.72, 1.01, 8.77, 'y', 10);   // azeite
+  cy(0.02, 0.02, 0.2, std({ color: 0xa9552b, roughness: 0.2 }), 4.76, 1.0, 8.77, 'y', 10);
+  cy(0.05, 0.05, 0.16, ceramic, 4.66, 0.98, 8.72, 'y', 14);                            // porta-utensílios
+  for (let i = 0; i < 3; i++) cy(0.006, 0.006, 0.18, [board, inox, dour][i], 4.65 + i * 0.015, 1.1, 8.72 + (i - 1) * 0.01, 'y', 6, nc);
+  // detergente / esponja ao lado da cuba
+  cy(0.03, 0.03, 0.2, plastic[1], 3.68, 1.0, 8.76, 'y', 10);
+  bx(3.45, 3.53, 0.90, 0.92, 8.62, 8.66, plastic[1], nc);
+  // escorredor de pratos dobrável sobre o tanque
+  bx(6.1, 6.45, 0.91, 0.93, 8.35, 8.65, chrome, nc);
+
+  // ---------- Armários superiores (prof. 0,35; y 1,60–2,45; tampo de 5 até 2,50)
+  const ZU = ZB - 0.35;
+  bx(1.61, 6.66, 2.45, 2.50, ZB - 0.60, ZB, gian);                                    // tampo/sanca superior
+  bx(3.06, 6.66, 1.60, 2.45, ZB - 0.02, ZB, inner, nc);                                // fundo
+  // 8 portas de 45 sobre a bancada (x 3,06–6,66); coifa embutida cobre x 3,86–4,61
+  const doorU = (x0, x1, y0, y1, zf, handleBottom = true) => {
+    bx(x0 + DG, x1 - DG, y0, y1, zf - 0.018, zf, gian);
+    const w = Math.min(0.3, (x1 - x0) * 0.6), cx = (x0 + x1) / 2;
+    if (handleBottom) bx(cx - w / 2, cx + w / 2, y0 + 0.012, y0 + 0.024, zf - 0.026, zf - 0.018, dour, nc);
+  };
+  bx(3.06, 6.66, 1.60, 2.45, ZB - 0.35, ZB - 0.33, inner, nc);                         // placa sob as portas (miolo)
+  for (let i = 0; i < 8; i++) {
+    const x0 = 3.06 + i * 0.45, x1 = x0 + 0.45;
+    bx(x0, x0 + 0.018, 1.60, 2.45, ZU, ZB, gian);                                       // divisórias
+    if (x0 >= 3.85 && x1 <= 4.62) {                                                     // coifa: porta fica acima da coifa (y 1,88–2,45)
+      doorU(x0, x1, 1.88, 2.45, ZU, false);
+    } else doorU(x0, x1, 1.60, 2.45, ZU);
+  }
+  bx(6.642, 6.66, 1.60, 2.45, ZU, ZB, gian);
+  bx(3.06, 6.66, 1.60, 1.615, ZU, ZB, gian);                                           // fundo do módulo
+  // Coifa nº1 Tramontina 75 Incasso (75 × 32,5 × 27): x 3,86–4,61 · y 1,55–1,88 · fundo na parede
+  bx(3.86, 4.61, 1.55, 1.88, ZB - 0.27, ZB - 0.02, inox);
+  bx(3.86, 4.61, 1.55, 1.575, ZB - 0.30, ZB - 0.27, inox);
+  bx(3.88, 4.59, 1.575, 1.58, ZB - 0.29, ZB - 0.27, blackApp, nc);
+  bx(4.37, 4.55, 1.56, 1.565, ZB - 0.29, ZB - 0.27, std({ color: 0xffe9b0, emissive: 0xffd88a, emissiveIntensity: 0.3 }), nc);
+
+  // ---------- Coluna dos nichos (x 2,47–3,04): Freijó aberto (em cima) + micro-ondas (embaixo), prof. 0,42
+  {
+    const nx0 = 2.47, nx1 = 3.04, nz0 = ZB - 0.42;
+    bx(nx0, nx1, 1.60, 1.62, nz0, ZB, freijo);                                          // base
+    bx(nx0, nx1, 1.97, 2.0, nz0, ZB, freijo);                                           // prateleira intermediária
+    bx(nx0, nx1, 2.43, 2.45, nz0, ZB, freijo);                                          // teto
+    bx(nx0, nx0 + 0.02, 1.60, 2.45, nz0, ZB, freijo);                                   // lados
+    bx(nx1 - 0.02, nx1, 1.60, 2.45, nz0, ZB, freijo);
+    bx(nx0 + 0.02, nx1 - 0.02, 1.62, 2.43, ZB - 0.02, ZB, freijo, nc);                  // fundo
+    // micro-ondas nº6 Brastemp 32 L (53,8 × 30 × 39): x 2,50–3,04 · y 1,62–1,92
+    bx(2.495, 3.035, 1.62, 1.92, nz0 + 0.02, nz0 + 0.41, micro);
+    bx(2.50, 2.86, 1.64, 1.90, nz0 + 0.0, nz0 + 0.02, glassDk, nc);                     // porta de vidro
+    bx(2.87, 3.03, 1.64, 1.90, nz0 + 0.0, nz0 + 0.02, blackApp, nc);                    // painel
+    for (let i = 0; i < 3; i++) bx(2.89, 2.99, 1.84 - i * 0.05, 1.86 - i * 0.05, nz0 - 0.004, nz0, std({ color: 0xaad4ff, emissive: 0x3a6a9a, emissiveIntensity: 0.4 }), nc);
+    // planta decorando o nicho de cima
+    cy(0.06, 0.045, 0.08, potCream, 2.76, 2.04, ZB - 0.2, 'y', 12);
+    for (let i = 0; i < 6; i++) { const m = sph(0.06, leaf[i % 3], 2.76 + (rnd() - 0.5) * 0.14, 2.14 + rnd() * 0.08, ZB - 0.2 + (rnd() - 0.5) * 0.1); m.scale.set(1, 0.7, 1); put(m); }
+    bx(2.95, 3.0, 2.0, 2.2, nz0 + 0.1, nz0 + 0.2, std({ color: 0x3a2f27, roughness: 0.6 }), nc);   // livro
+  }
+
+  // ---------- Superiores sobre a geladeira: 2 portas (x 1,61–2,46), y 1,93–2,45, prof. 0,60
+  {
+    const zf = ZB - 0.65;
+    bx(1.61, 2.46, 1.93, 2.45, zf, ZB, inner);
+    bx(1.61, 2.47, 1.93, 1.95, zf, ZB, gian);
+    bx(1.61 + DG, 2.035 - DG, 1.95, 2.45, zf - 0.018, zf, gian);
+    bx(2.035 + DG, 2.46 - DG, 1.95, 2.45, zf - 0.018, zf, gian);
+    bx(1.99, 2.01, 1.97, 2.06, zf - 0.026, zf - 0.018, dour, nc);
+    bx(2.06, 2.08, 1.97, 2.06, zf - 0.026, zf - 0.018, dour, nc);
+    solid(1.61, zf, 2.46, ZB, 2.5);
+  }
+  // fita de LED sob os superiores (aciona com luz_cozinha)
+  {
+    const led = new THREE.MeshStandardMaterial({ color: 0xfff0d0, emissive: 0xffe2a8, emissiveIntensity: 0.8, roughness: 0.5 });
+    if (ctx.bindEmissive) ctx.bindEmissive('luz_cozinha', led, 1.2, { min: 0.1 });
+    bx(3.06, 6.65, 1.585, 1.598, ZU + 0.05, ZU + 0.06, led, nc);
+  }
+
+  // =========================================================================
+  // VARANDA (x 0,17–1,05 · z 0,23–7,94) — passagem livre ≥ 0,45 m
+  // =========================================================================
+  // plantas junto ao peitoril
+  plant(0.33, 0.62, 1.1, potCream, 1.1, 8);                                         // folhagem ao lado do shaft
+  plant(0.33, 1.45, 0.9, potTerra, 0.8, 6);
+  plant(0.33, 7.62, 0.9, potDark, 1.0, 7);                                          // junto à área de serviço (ao lado da porta da sala fechava a passagem)
+  plant(0.34, 6.55, 0.8, potTerra, 0.7, 5);
+  // (sem jardineira junto ao pilar: com o pilar, fechava a passagem para a ponta norte da varanda)
+  // (sem cadeira/mesinha: não aparecem na planta e fechavam a passagem de 0,85 m até a área de serviço)
+  // varal retrátil de teto (sugestão do uso como lavanderia): dois suportes finos de inox sobre a varanda
+  bx(0.2, 0.22, 2.30, 2.42, 7.5, 7.85, inox, nc); bx(0.8, 0.82, 2.30, 2.42, 7.5, 7.85, inox, nc);
+  for (let i = 0; i < 4; i++) cy(0.004, 0.004, 0.62, inox, 0.51, 2.40, 7.52 + i * 0.1, 'x', 5, nc);
+
+  // =========================================================================
+  // ÁREA DE SERVIÇO (x 0,17–0,86 · z 7,94–8,59): bancada de pedra 0,68 × 0,65, máquina embaixo, tanque, prateleira
+  // =========================================================================
+  {
+    const x0 = 0.18, x1 = 0.86, z0 = 7.94, z1 = 8.59;
+    // bancada de pedra clara h 0,90 com furo do tanque; painéis laterais e fundo em pedra
+    slab(x0, x1, z0, z1, 0.88, 0.90, pedra, [[0.52, 8.28, 0.44, 0.34]]);
+    bx(x0, x0 + 0.02, 0.0, 0.88, z0, z1, pedra);
+    bx(x1 - 0.02, x1, 0.0, 0.88, z0, z1, pedra);
+    bx(x0, x1, 0.0, 0.88, z1 - 0.02, z1, pedra);
+    bx(x0, x1, 0.90, 1.0, z1 - 0.02, z1, pedra);                                         // rodabancada
+    basin(0.52, 8.28, 0.44, 0.34, 0.90, inox, 0.2);
+    gooseneck(0.52, 0.90, z1 - 0.07, chrome, 0.26, 0.15);
+    // máquina de lavar sob a bancada (x 0,24–0,80 · z 8,00–8,53), carga frontal branca
+    bx(0.24, 0.80, 0.02, 0.84, 8.0, 8.53, white);
+    bx(0.26, 0.78, 0.0, 0.02, 8.04, 8.5, plinth, nc);
+    cy(0.19, 0.19, 0.02, chrome, 0.52, 0.40, 7.99, 'z', 24);
+    cy(0.155, 0.155, 0.03, glassDk, 0.52, 0.40, 7.985, 'z', 24);
+    bx(0.28, 0.76, 0.74, 0.82, 7.985, 8.0, blackApp, nc);
+    solid(x0, z0, x1, z1, 1);
+    // prateleiras de parede (z 8,59 → saem 0,22 m) com produtos
+    const sh = (y) => bx(0.20, 0.84, y, y + 0.025, z1 - 0.22, z1, frape);
+    sh(1.50); sh(1.90);
+    for (let i = 0; i < 4; i++) {
+      cy(0.04, 0.04, 0.24, plastic[i], 0.26 + i * 0.1, 1.5 + 0.025 + 0.12, z1 - 0.1, 'y', 10);
+      cy(0.012, 0.012, 0.06, plastic[(i + 1) % 4], 0.26 + i * 0.1, 1.5 + 0.025 + 0.27, z1 - 0.1, 'y', 6, nc);
+    }
+    bx(0.52, 0.80, 1.925, 2.15, z1 - 0.2, z1 - 0.03, rattan);                              // cesto
+    bx(0.22, 0.46, 1.925, 1.96, z1 - 0.2, z1 - 0.03, linho);                               // toalhas dobradas
+    bx(0.22, 0.46, 1.96, 1.99, z1 - 0.19, z1 - 0.04, white);
+    // plafon/arandela da área é do cartão (luz_servico) — não recriar
+  }
+}
+
+function roomSuiteMaster(ctx) {
+  // ---------------------------------------------------------------------------
+  // SUÍTE MASTER — quarto x 7,12–10,14 · z 0,25–5,02 (em L: pilar x 9,76–10,23 · z 1,59–2,87 e antecâmara da porta do hall).
+  //  · Cama box queen nº 14 (Herval Amore 1,58 × 1,98, h 0,67 no topo do colchão): estrado estofado, colchão, edredom cinza-claro,
+  //    travesseiros, almofadas, peseira; cabeceira estofada greige na parede x 7,07 (face 7,12) com revestimento cimentício claro.
+  //  · Criados embutidos em madeira escura (≈ #8c7a63) 30 × 52 / 59, h 0,60, com gavetas e abajures (acendem com 'luz_suite_master').
+  //  · Armário G 478 × 60 × 250 em MDF Frapê Arauco (rodapé 10 + portas 235 + tampo 5), ao longo da parede leste:
+  //    3 portas 44/44/46 (z 0,25–1,59, trecho norte raso e recuado — ≈), painel de ESPELHO 128 sobre o pilar (z 1,59–2,87),
+  //    3 portas 52/52/52 (z 2,87–4,43); puxadores verticais dourados (par nas juntas 1|2 / 52|52 e simples nas outras).
+  //  · Retorno H 160 × 60 × 250 na parede sul (x 8,54–10,13 · z 4,43–5,02): 2 portas de espelho 49 + porta Frapê 61 do canto.
+  //  · Cortina de linho em prega da janela norte (x 7,76–9,56), tapete, bandeja/livros/vaso nos criados.
+  // Do cartão (não recriar): paredes, piso, janela, porta do hall (x 6,72 · z 3,42–4,12), porta do banho, ar cassete nº 15 (8,81; 2,50; 3,68).
+  // Folgas: giro da porta do hall (raio 0,8 em torno de 6,72 / 4,12) e do banho continuam livres; a cama fica a ≥ 0,43 do armário.
+  // ---------------------------------------------------------------------------
+  const THREE = ctx.THREE, M = ctx.M || {};
+  const box = (...a) => ctx.box(...a), cyl = (...a) => ctx.cyl(...a), sph = (...a) => ctx.sph(...a);
+  const std = (o) => ctx.std(o);
+  const put = (m) => { ctx.add(m); return m; };
+  const B = (w, h, d, mat, x, y, z, o) => put(box(w, h, d, mat, x, y, z, o));       // caixa centrada em (x, y, z)
+  const nc = { cast: false };
+  const PI = Math.PI;
+
+  // ---- materiais ------------------------------------------------------------
+  const frape    = M.frape    || std({ color: 0xbfae9d, roughness: 0.6 });                   // MDF Frapê Arauco (greige)
+  const frapeIn  = std({ color: 0x8e8071, roughness: 0.8 });                                  // fundo/vão entre portas (escurece a fresta)
+  const dourado  = std({ color: 0xc8a45c, roughness: 0.28, metalness: 0.85 });                // puxadores e filetes champanhe
+  const espelho  = M.espelho  || std({ color: 0xd6dadc, roughness: 0.05, metalness: 1 });
+  const woodDk   = std({ color: 0x8c7a63, roughness: 0.55 });                                 // madeira escura dos criados
+  const woodDk2  = std({ color: 0x75664f, roughness: 0.6 });
+  const cimento  = std({ color: 0xd8d0c3, roughness: 0.96 });                                 // parede da cabeceira (efeito cimentício claro)
+  const headFab  = std({ color: 0xa99d8c, roughness: 0.97 });                                 // cabeceira estofada greige
+  const baseFab  = std({ color: 0x9a8f80, roughness: 0.97 });                                 // estrado
+  const sheet    = std({ color: 0xf1ede6, roughness: 0.95 });                                 // lençol/travesseiros
+  const duvet    = std({ color: 0xc9c8c4, roughness: 0.97 });                                 // roupa de cama cinza-claro
+  const throwM   = std({ color: 0x8d8272, roughness: 1 });                                    // peseira
+  const cushion  = std({ color: 0xe6dfd2, roughness: 0.97 });
+  const cushionD = std({ color: 0x2a2a2c, roughness: 0.9 });                                  // listras da almofada
+  const linenC   = std({ color: 0xe0d6c4, roughness: 1, side: THREE.DoubleSide });            // cortina de linho
+  const linenC2  = std({ color: 0xd2c7b3, roughness: 1, side: THREE.DoubleSide });
+  const railM    = std({ color: 0xcfc9bd, roughness: 0.5, metalness: 0.2 });
+  const rugField = std({ color: 0xd9d0c0, roughness: 1 });
+  const rugBand  = std({ color: 0xbaad98, roughness: 1 });
+  const rugLine  = std({ color: 0xa3957f, roughness: 1 });
+  const paper    = std({ color: 0xf1ede4, roughness: 0.9 });
+  const bookM    = [0x6b5a46, 0xc9bfae, 0x3d4a52, 0x9b6f4f].map((c) => std({ color: c, roughness: 0.9 }));
+  const ceramic  = std({ color: 0xece7dd, roughness: 0.35 });
+  const leaf     = std({ color: 0x4f6b45, roughness: 0.9 });
+  const trayM    = std({ color: 0x3a3228, roughness: 0.5 });
+  const glassD   = std({ color: 0xdfe6e8, roughness: 0.1, transparent: true, opacity: 0.4 });
+  // Abajures: cúpula de linho que acende com a luz da suíte (se o cartão oferecer o brilho ligado à entidade)
+  const lampShadeBase = new THREE.MeshStandardMaterial({ color: 0xe8e1d2, roughness: 0.9, emissive: 0xffd9a8, emissiveIntensity: 0, side: THREE.DoubleSide });
+  const lampShade = typeof ctx.bindEmissive === 'function' ? ctx.bindEmissive('luz_suite_master', lampShadeBase, 0.85, { min: 0 }) : lampShadeBase;
+
+  // ---- colisores do modo Pessoa (se o cartão expuser) -----------------------
+  const solid = (x0, z0, x1, z1) => {
+    if (typeof ctx.addCollider === 'function') ctx.addCollider(x0, z0, x1, z1);
+    else if (typeof ctx.collider === 'function') ctx.collider(x0, z0, x1, z1);
+    else if (Array.isArray(ctx.colliders)) ctx.colliders.push([x0, z0, x1, z1]);
+  };
+
+  // ======================= PAREDE DA CABECEIRA (cimentício) =======================
+  B(0.006, 2.5, 3.04, cimento, 7.123, 1.25, 1.77, nc);                                     // x 7,12 · z 0,25–3,29 · até o forro
+
+  // ======================= CAMA QUEEN Nº 14 =======================
+  // x 7,12–9,10 · z 0,99–2,57 (centro z 1,78), cabeceira em x 7,12, pés para +x
+  const CZ = 1.78;
+  // cabeceira estofada: painel largo (entre os criados, z 0,92–2,65) com almofadado vertical
+  B(0.07, 1.2, 1.73, headFab, 7.17, 0.75, CZ);
+  for (let i = 0; i < 4; i++) B(0.012, 0.72, 0.012, baseFab, 7.21, 0.82, 0.92 + (i + 1) * 0.346, nc);       // pesponto vertical
+  B(0.07, 0.02, 1.73, baseFab, 7.17, 1.36, CZ, nc);
+  // estrado estofado (rodapé recuado) + colchão + roupa de cama
+  B(1.86, 0.06, 1.46, std({ color: 0x4a443c, roughness: 0.8 }), 8.16, 0.03, CZ, nc);       // base recuada
+  B(1.90, 0.26, 1.54, baseFab, 8.16, 0.19, CZ);                                           // estrado y 0,06–0,32
+  B(1.88, 0.20, 1.52, sheet, 8.15, 0.42, CZ);                                              // colchão y 0,32–0,52
+  B(1.50, 0.18, 1.58, duvet, 8.35, 0.58, CZ);                                              // edredom (topo em 0,67) caindo pelos lados
+  B(0.50, 0.025, 1.52, sheet, 7.52, 0.5275 + 0.0, CZ, nc);                                 // lençol exposto junto à cabeceira
+  B(0.10, 0.12, 1.58, sheet, 7.63, 0.62, CZ);                                              // dobra do lençol
+  B(0.50, 0.04, 1.56, sheet, 7.66, 0.665, CZ, nc);                                         // cobre o edredom na altura da dobra
+  // travesseiros (esferas achatadas = volume macio)
+  const pillow = (x, y, z, sx, sy, sz, mat, rz = 0, ry = 0) => { const p = sph(1, mat, x, y, z); p.scale.set(sx, sy, sz); p.rotation.z = rz; p.rotation.y = ry; return put(p); };
+  pillow(7.46, 0.77, CZ - 0.37, 0.21, 0.085, 0.33, sheet);
+  pillow(7.46, 0.77, CZ + 0.37, 0.21, 0.085, 0.33, sheet);
+  pillow(7.70, 0.80, CZ - 0.37, 0.18, 0.09, 0.28, cushion, -0.5);                          // almofadas apoiadas nos travesseiros
+  pillow(7.70, 0.80, CZ + 0.37, 0.18, 0.09, 0.28, cushion, -0.5);
+  // almofada comprida listrada na frente
+  B(0.20, 0.15, 0.58, cushion, 7.93, 0.745, CZ);
+  for (let i = 0; i < 5; i++) B(0.202, 0.152, 0.018, cushionD, 7.93, 0.745, CZ - 0.2 + i * 0.1, nc);
+  // peseira (manta dobrada em 3) e manta leve
+  B(0.40, 0.045, 1.60, throwM, 8.62, 0.69, CZ);
+  B(0.40, 0.012, 1.60, std({ color: 0x7a705f, roughness: 1 }), 8.62, 0.7155, CZ, nc);
+  B(0.18, 0.04, 1.60, throwM, 8.82, 0.665, CZ, nc);
+  solid(7.12, 0.99, 9.10, 2.57);
+
+  // ======================= CRIADOS EMBUTIDOS (madeira escura) =======================
+  const criado = (z0, z1) => {
+    const zc = (z0 + z1) / 2, d = z1 - z0;
+    B(0.28, 0.10, d - 0.06, frapeIn, 7.28, 0.05, zc, nc);                                  // rodapé recuado
+    B(0.30, 0.46, d, woodDk, 7.29, 0.33, zc);                                               // corpo y 0,10–0,56
+    B(0.32, 0.04, d + 0.02, woodDk2, 7.30, 0.58, zc);                                       // tampo y 0,56–0,60
+    for (const [yy, hh] of [[0.22, 0.20], [0.43, 0.20]]) {                                  // 2 gavetas
+      B(0.018, hh, d - 0.04, woodDk, 7.448, yy, zc, nc);
+      B(0.012, 0.02, 0.16, dourado, 7.46, yy + hh / 2 - 0.035, zc, nc);                     // puxador de fenda dourado
+    }
+    solid(7.12, z0, 7.46, z1);
+  };
+  criado(0.40, 0.92);
+  criado(2.65, 3.24);
+  // abajures
+  const lamp = (x, z) => {
+    put(cyl(0.055, 0.065, 0.02, dourado, x, 0.61, z, 14));
+    put(cyl(0.012, 0.012, 0.26, dourado, x, 0.74, z, 8));
+    put(cyl(0.085, 0.125, 0.19, lampShade, x, 0.95, z, 18, true));
+    put(cyl(0.088, 0.088, 0.008, dourado, x, 1.045, z, 18, true));
+  };
+  lamp(7.30, 0.62);
+  lamp(7.30, 2.98);
+  // objetos de apoio: bandeja com livros e vaso (criado norte), livros e copo (criado sul)
+  B(0.18, 0.015, 0.24, trayM, 7.34, 0.6075, 0.80, nc);
+  B(0.15, 0.03, 0.20, bookM[1], 7.34, 0.63, 0.80, nc);
+  B(0.13, 0.025, 0.18, bookM[2], 7.34, 0.658, 0.80, nc);
+  put(cyl(0.035, 0.03, 0.09, ceramic, 7.40, 0.66, 0.51, 12));
+  for (const [a, h] of [[-0.5, 0.18], [0.1, 0.22], [0.6, 0.16]]) { const s = B(0.006, h, 0.05, leaf, 7.40 + a * 0.03, 0.74 + h / 2 - 0.04, 0.51, nc); s.rotation.z = a * 0.5; }
+  B(0.14, 0.03, 0.2, bookM[3], 7.35, 0.615, 3.12, nc);
+  B(0.12, 0.025, 0.17, bookM[0], 7.35, 0.6425, 3.12, nc);
+  put(cyl(0.03, 0.026, 0.1, glassD, 7.40, 0.66, 2.78, 12, false)).castShadow = false;
+
+  // ======================= ARMÁRIO G (parede leste) E RETORNO H (parede sul) =======================
+  // construtor de peças: a = coordenada ao longo da frente, d = profundidade a partir da frente (para dentro da parede)
+  const mk = (axis, front) => (a0, a1, d0, d1, y0, y1, mat, o) => axis === 'z'
+    ? B(d1 - d0, y1 - y0, a1 - a0, mat, front + (d0 + d1) / 2, (y0 + y1) / 2, (a0 + a1) / 2, o)
+    : B(a1 - a0, y1 - y0, d1 - d0, mat, (a0 + a1) / 2, (y0 + y1) / 2, front + (d0 + d1) / 2, o);
+  const GAP = 0.004;
+  // Faixa de portas: bounds = lista de bordas; kinds = 'f' (frapê) | 'm' (espelho)
+  const doors = (P, front, bounds, kinds, y0 = 0.10, y1 = 2.45, depth = 0.018, shift = 0) => {
+    for (let i = 0; i < kinds.length; i++) {
+      const a0 = bounds[i] + GAP, a1 = bounds[i + 1] - GAP;
+      if (kinds[i] === 'f') P(a0, a1, shift, shift + depth, y0, y1, frape);
+      else {
+        P(a0, a1, shift, shift + 0.012, y0, y1, espelho, nc);
+        // moldura dourada fina
+        P(a0, a0 + 0.008, shift - 0.004, shift + 0.016, y0, y1, dourado, nc);
+        P(a1 - 0.008, a1, shift - 0.004, shift + 0.016, y0, y1, dourado, nc);
+        P(a0, a1, shift - 0.004, shift + 0.016, y0, y0 + 0.008, dourado, nc);
+        P(a0, a1, shift - 0.004, shift + 0.016, y1 - 0.008, y1, dourado, nc);
+      }
+    }
+  };
+  const handle = (P, a, y0, y1, dbl, shift = 0) => {
+    const w = 0.014;
+    P(a - w / 2 - (dbl ? 0.012 : 0), a + w / 2 - (dbl ? 0.012 : 0), shift - 0.03, shift - 0.002, y0, y1, dourado, nc);
+    if (dbl) P(a - w / 2 + 0.012, a + w / 2 + 0.012, shift - 0.03, shift - 0.002, y0, y1, dourado, nc);
+  };
+
+  // ---- G, trecho central e sul: frente em x = 9,53, prof. 0,60 (z 1,59–4,43) ----
+  const G = mk('z', 9.53);
+  G(1.59, 4.43, 0.03, 0.60, 0, 0.10, frapeIn, nc);                                         // rodapé recuado 3 cm
+  G(1.59, 4.43, 0.018, 0.60, 0.10, 2.45, frapeIn);                                         // corpo
+  G(1.59, 4.43, 0, 0.60, 2.45, 2.50, frape);                                                // tampo 5 cm
+  doors(G, 9.53, [1.59, 2.87], ['m'], 0.10, 2.45);
+  // pilar: o painel de espelho cobre o pilar (x 9,76–10,23) — o corpo aqui só tem a profundidade até ele
+  doors(G, 9.53, [2.87, 3.39, 3.91, 4.43], ['f', 'f', 'f']);
+  // ---- G, trecho norte (raso e recuado, ≈): z 0,25–1,59, frente em x = 9,63, prof. 0,26 ----
+  const Gn = mk('z', 9.63);
+  Gn(0.25, 1.59, 0.03, 0.26, 0, 0.10, frapeIn, nc);
+  Gn(0.25, 1.59, 0.018, 0.26, 0.10, 2.45, frapeIn);
+  Gn(0.25, 1.59, 0, 0.26, 2.45, 2.50, frape);
+  doors(Gn, 9.63, [0.25, 0.69, 1.13, 1.59], ['f', 'f', 'f']);
+  // puxadores (y 0,64–1,44): par nas juntas 1|2 e simples em 2|3
+  handle(Gn, 0.69, 0.64, 1.44, true);
+  handle(Gn, 1.13, 0.64, 1.44, false);
+  handle(G, 3.39, 0.64, 1.44, true);
+  handle(G, 3.91, 0.64, 1.44, false);
+  // faixa dourada vertical nas bordas do espelho (ressalto do painel)
+  G(1.59, 1.595, -0.004, 0.03, 0.10, 2.45, dourado, nc);
+  G(2.865, 2.87, -0.004, 0.03, 0.10, 2.45, dourado, nc);
+  solid(9.53, 1.59, 10.13, 4.43);
+  solid(9.63, 0.25, 9.89, 1.59);
+
+  // ---- H: retorno em L na parede sul (frente em z = 4,43, prof. 0,59 até a parede em z 5,02) ----
+  const H = mk('x', 4.43);
+  H(8.54, 10.13, 0.03, 0.59, 0, 0.10, frapeIn, nc);
+  H(8.54, 10.13, 0.018, 0.59, 0.10, 2.45, frapeIn);
+  H(8.54, 10.13, 0, 0.59, 2.45, 2.50, frape);
+  doors(H, 4.43, [8.54, 9.03, 9.52, 10.13], ['m', 'm', 'f']);
+  handle(H, 9.03, 0.64, 1.44, true);
+  handle(H, 9.52, 0.64, 1.44, false);
+  solid(8.54, 4.43, 10.13, 5.02);
+
+  // ======================= CORTINA DE LINHO DA JANELA NORTE =======================
+  // janela x 7,76–9,56 na parede z 0,25: duas folhas em prega, do trilho no forro ao chão
+  const folds = (xa, xb, tone) => {
+    const n = Math.round((xb - xa) / 0.075);
+    for (let i = 0; i < n; i++) {
+      const x = xa + (i + 0.5) * (xb - xa) / n;
+      const f = B(0.095, 2.44, 0.014, i % 2 ? linenC : linenC2, x, 1.24, 0.30 + (i % 2 ? 0.035 : 0), nc);
+      f.rotation.y = (i % 2 ? 1 : -1) * 0.5;
+      if (tone) f.position.y += 0;
+    }
+  };
+  folds(7.45, 8.52, 0); folds(8.62, 9.60, 0);
+  B(2.22, 0.035, 0.07, railM, 8.525, 2.475, 0.325, nc);                                    // trilho/sanca de cortina
+  B(0.08, 0.30, 0.05, linenC2, 7.43, 0.15, 0.31, nc);                                      // sobra do tecido no chão (barra dobrada)
+
+  // ======================= TAPETE =======================
+  const rugY = 0.012;
+  B(1.94, 0.012, 2.12, rugBand, 8.43, rugY / 2, 1.78, nc);
+  B(1.78, 0.014, 1.96, rugField, 8.43, 0.007 + 0.001, 1.78, nc);
+  B(1.60, 0.016, 1.78, rugLine, 8.43, 0.008 + 0.001, 1.78, nc);
+  B(1.54, 0.018, 1.72, rugField, 8.43, 0.009 + 0.001, 1.78, nc);
+}
+
+function roomSuitesVisita(ctx) {
+  // ---------------------------------------------------------------------------
+  // SUÍTES DE VISITA — Apartamento Vovó (APTO DIVINA · STORIA)
+  //  · Suíte visita (x 4,37–7,02 · z 0,25–3,24): cômoda F (vista F, Freijó, 4 colunas × 3 linhas de
+  //    gavetas com botão central superior e nicho aberto no canto inferior direito), cama box casal nº 13
+  //    (1,38 × 1,88, cabeceira na parede x 7,07, roupa azul-claro), cortina de linho + voal + varão dourado
+  //    na janela norte (sobre a cômoda), tapete, quadro sobre a cabeceira, abajur/bandeja/vaso sobre a
+  //    cômoda e planta no canto. Ar nº 12 é do cartão (x 4,47 · y 2,28 · z 2,04).
+  //  · Suíte americana 01 / sala de TV (x 1,31–4,27 · z 1,69–4,24): sofá-cama nº 11 (180 × 90, tecido
+  //    cinza, encosto na parede z 4,29), armário E (vista E, Frapê, 163 × 60 × 250, 4 portas 41/41/41/40,
+  //    puxadores verticais dourados, costas na parede x 4,32), cortina de linho da porta de vidro da
+  //    varanda (z 2,95–4,14), tapete, mesa de centro redonda, quadro e planta. Ar nº 10 é do cartão.
+  //  · Hall íntimo (x 4,37–6,70 · z 3,34–4,24): console estreito de carvalho com pés dourados e quadro,
+  //    na parede sul da suíte visita (deixa ≥ 0,74 m de passagem).
+  // Livres: giro da porta da suíte visita (x 4,46–5,23, para −z), da porta da suíte americana (x 4,32,
+  // folha varre x 3,52–4,32 · z 3,42–4,22) e da porta do master (x 6,72), os splits 10 e 12 e as luminárias.
+  // Tudo em coordenadas de mundo (metros). Colisores do modo Pessoa: `solid(x0, z0, x1, z1)`.
+  // ---------------------------------------------------------------------------
+  const THREE = ctx.THREE, M = ctx.M;
+  const box = (...a) => ctx.box(...a), cyl = (...a) => ctx.cyl(...a), sph = (...a) => ctx.sph(...a);
+  const std = (o) => ctx.std(o), rnd = () => ctx.rnd();
+  const place = (g, x, z, ry = 0, y = 0) => ctx.place(g, x, z, ry, y);
+  const put = (m) => { ctx.add(m); return m; };
+  const G = () => new THREE.Group();
+  const nc = { cast: false };
+  const PI = Math.PI;
+  const FZ = 0, FX = PI / 2, FNX = -PI / 2, FNZ = PI;   // frente (+z local) virada para +z / +x / −x / −z
+
+  // caixa por extensões em coordenadas de mundo: x0..x1, y0..y1, z0..z1
+  const W = (mat, x0, x1, y0, y1, z0, z1, o) => put(box(x1 - x0, y1 - y0, z1 - z0, mat, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, o));
+  // idem, dentro de um grupo local
+  const L = (g, mat, x0, x1, y0, y1, z0, z1, o) => { const m = box(x1 - x0, y1 - y0, z1 - z0, mat, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, o); g.add(m); return m; };
+  const solid = (x0, z0, x1, z1) => {
+    if (typeof ctx.addCollider === 'function') ctx.addCollider(x0, z0, x1, z1);
+    else if (Array.isArray(ctx.colliders)) ctx.colliders.push([x0, z0, x1, z1]);
+  };
+  // elipsoide achatado (travesseiros, almofadas, folhas)
+  const puff = (mat, cx, cy, cz, sx, sy, sz, rx = 0, ry = 0, rz = 0, o) => {
+    const m = sph(1, mat, cx, cy, cz); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz);
+    if (o && o.cast === false) m.castShadow = false;
+    return put(m);
+  };
+
+  // ---- materiais (mesmas opções → mesmo material) -------------------------------------------------
+  const pick = (k, o) => M[k] || std(o);
+  const frape   = pick('frape',   { color: 0xcdbfae, roughness: 0.75 });
+  const freijo  = pick('freijo',  { color: 0xd9bb88, roughness: 0.6 });
+  const carvalho = pick('carvalho', { color: 0xcfb48a, roughness: 0.6 });
+  const dourado = pick('dourado', { color: 0xc9a66b, roughness: 0.3, metalness: 0.85 });
+  const linho   = pick('linho',   { color: 0xe5dfd2, roughness: 0.97 });
+  const freijoDk = std({ color: 0x8a6c43, roughness: 0.75 });          // fundo/sombra das gavetas e rodapé
+  const freijoLt = std({ color: 0xe6cd9f, roughness: 0.6 });           // interior do nicho
+  const knobM   = std({ color: 0x74492a, roughness: 0.5 });            // botão de madeira escura
+  const frapeDk = std({ color: 0xa79d8f, roughness: 0.8 });            // rodapé do armário E
+  const frapeGap = std({ color: 0x6f675c, roughness: 0.9 });           // fresta entre portas
+  const skirtF  = std({ color: 0xbdb5a6, roughness: 0.96 });           // saia do box da cama
+  const mattress = std({ color: 0xf1eee7, roughness: 0.95 });
+  const duvet   = std({ color: 0xcddcec, roughness: 0.97 });           // roupa de cama azul-claro
+  const duvetFold = std({ color: 0xbacfe5, roughness: 0.97 });
+  const throwM  = std({ color: 0xcbbca4, roughness: 0.98 });           // manta greige
+  const pillow  = std({ color: 0xf4f2ec, roughness: 0.96 });
+  const pillowBlue = std({ color: 0xaebfd1, roughness: 0.96 });
+  const pillowSand = std({ color: 0xcdb79a, roughness: 0.96 });
+  const fabricGray = std({ color: 0x9ea396, roughness: 0.98 });        // sofá-cama
+  const fabricGrayLt = std({ color: 0xabb0a2, roughness: 0.98 });
+  const fabricSeam = std({ color: 0x80857a, roughness: 1 });
+  const legDark = std({ color: 0x3a342e, roughness: 0.6 });
+  const rugField = std({ color: 0xded7c9, roughness: 1 });
+  const rugEdge = std({ color: 0xc7bda9, roughness: 1 });
+  const rugLine = std({ color: 0xb2a58e, roughness: 1 });
+  const rugField2 = std({ color: 0xd5cdbb, roughness: 1 });
+  const curtainM = std({ color: 0xe4ddcf, roughness: 0.98 });
+  const curtainM2 = std({ color: 0xd9d1c0, roughness: 0.98 });
+  const sheer   = std({ color: 0xf5f2ea, roughness: 0.9, transparent: true, opacity: 0.38, side: THREE.DoubleSide });
+  const railM   = std({ color: 0xf2f0ea, roughness: 0.6 });
+  const ceramic = std({ color: 0xf1eee8, roughness: 0.35 });
+  const ceramicBg = std({ color: 0xcbbfa9, roughness: 0.5 });
+  const paperW  = std({ color: 0xf7f4ee, roughness: 0.9 });
+  const book1   = std({ color: 0x8c9db0, roughness: 0.8 });
+  const book2   = std({ color: 0xc6b08e, roughness: 0.8 });
+  const book3   = std({ color: 0xe8e2d4, roughness: 0.8 });
+  const frameG  = dourado;
+  const frameW  = std({ color: 0xe9e2d3, roughness: 0.55 });
+  const potM    = std({ color: 0xd8cfbf, roughness: 0.7 });
+  const potDk   = std({ color: 0x3a3733, roughness: 0.6 });
+  const soil    = std({ color: 0x3d2b1c, roughness: 1 });
+  const leafA   = std({ color: 0x4a6b3c, roughness: 0.8 });
+  const leafB   = std({ color: 0x5b7c46, roughness: 0.8 });
+  const stemM   = std({ color: 0x6a5a3c, roughness: 0.9 });
+  const dryM    = std({ color: 0xcdb98f, roughness: 0.95 });
+  // abajur: cúpula de linho que acende com a luz da suíte visita
+  const shadeM = ctx.bindEmissive
+    ? ctx.bindEmissive('luz_suite_visita', new THREE.MeshStandardMaterial({ color: 0xece5d6, roughness: 0.9, emissive: 0xffd9a8, emissiveIntensity: 0, side: THREE.DoubleSide }), 0.8, { min: 0 })
+    : std({ color: 0xece5d6, roughness: 0.9, side: THREE.DoubleSide });
+
+  // ---- quadros (arte abstrata em tons de greige/azul-acinzentado/terracota suave) ------------------
+  const artTex = (kind) => ctx.makeTex ? ctx.makeTex(256, (g, s) => {
+    g.fillStyle = kind === 0 ? '#e9e1d2' : kind === 1 ? '#ddd6c8' : '#e6dfd0'; g.fillRect(0, 0, s, s);
+    if (kind === 0) {            // arcos sobrepostos
+      const cols = ['#c9b79b', '#a9b4bf', '#d9c9ae', '#b7a285'];
+      for (let i = 0; i < 4; i++) { g.fillStyle = cols[i]; g.beginPath(); g.arc(s * (0.28 + i * 0.15), s * 0.62, s * (0.32 - i * 0.045), PI, 0); g.lineTo(s * (0.6 + i * 0.15 - 0.05 * i), s * 0.9); g.lineTo(s * (-0.04 + i * 0.15), s * 0.9); g.fill(); }
+    } else if (kind === 1) {     // linhas de horizonte
+      const cols = ['#b9c3cc', '#cdbfa6', '#a99a82', '#dcd3c0'];
+      for (let i = 0; i < 4; i++) { g.fillStyle = cols[i]; g.fillRect(0, s * (0.12 + i * 0.2), s, s * (0.14 + 0.02 * i)); }
+      g.fillStyle = '#c4a584'; g.beginPath(); g.arc(s * 0.68, s * 0.34, s * 0.12, 0, PI * 2); g.fill();
+    } else {                     // manchas orgânicas
+      const cols = ['#bfa58a', '#9fb0bf', '#d4c2a6'];
+      for (let i = 0; i < 3; i++) { g.fillStyle = cols[i]; g.beginPath(); g.ellipse(s * (0.3 + 0.2 * i), s * (0.5 + 0.1 * Math.sin(i * 2)), s * 0.22, s * 0.3, i * 0.6, 0, PI * 2); g.fill(); }
+    }
+  }) : null;
+  const art0 = artTex(0), art1 = artTex(1), art2 = artTex(2);
+  const artMat = (t) => t ? std({ map: t, roughness: 0.9 }) : std({ color: 0xcfc4ae, roughness: 0.9 });
+  // quadro de parede: (x, y, z) = centro-base do quadro no plano da parede, ry = direção da frente
+  const picture = (x, y, z, ry, w, h, tex, frame) => {
+    const g = G();
+    g.add(box(w, h, 0.03, frame, 0, h / 2, 0.015, nc));
+    g.add(box(w - 0.05, h - 0.05, 0.012, paperW, 0, h / 2, 0.034, nc));
+    g.add(box(w - 0.13, h - 0.13, 0.008, artMat(tex), 0, h / 2, 0.04, nc));
+    place(g, x, z, ry, y); return g;
+  };
+
+  // ---- planta de folhas largas -----------------------------------------------------------------
+  const plant = (x, z, s = 1, pot = potM, bnd = null) => {   // bnd = [x0, z0, x1, z1]: folhas não atravessam as paredes do canto
+    put(cyl(0.12 * s, 0.09 * s, 0.24 * s, pot, x, 0.12 * s, z, 14));
+    put(cyl(0.105 * s, 0.105 * s, 0.01, soil, x, 0.245 * s, z, 12));
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.1, bx = x + Math.cos(a) * 0.02 * s, bz = z + Math.sin(a) * 0.02 * s;
+      const st = cyl(0.008 * s, 0.01 * s, 0.7 * s, stemM, bx, 0.58 * s, bz, 6); st.rotation.z = Math.cos(a) * 0.08; st.rotation.x = Math.sin(a) * 0.08; put(st);
+    }
+    for (let i = 0; i < 11; i++) {
+      const a = i * 2.4 + rnd() * 0.5, h = (0.5 + (i % 5) * 0.12 + rnd() * 0.06) * s, r = (0.1 + (i % 3) * 0.04) * s;
+      const mg = 0.19 * s, cl = (v, lo, hi) => (bnd ? Math.min(Math.max(v, lo + mg), hi - mg) : v);
+      puff(i % 2 ? leafA : leafB, cl(x + Math.cos(a) * r, bnd && bnd[0], bnd && bnd[2]), 0.25 * s + h, cl(z + Math.sin(a) * r, bnd && bnd[1], bnd && bnd[3]), 0.1 * s, 0.025 * s, 0.17 * s, 0.6, -a, Math.cos(a) * 0.5, nc);
+    }
+  };
+
+  // ---- cortina em pregas: tiras com recuos alternados, ao longo de x ('x') ou z ('z') ------------------
+  const pleats = (mat, axis, a0, a1, c, depth, y0, y1, n) => {
+    for (let i = 0; i < n; i++) {
+      const lo = a0 + (a1 - a0) * i / n, hi = a0 + (a1 - a0) * (i + 1) / n + 0.004;
+      const off = depth * (0.5 + 0.5 * Math.sin(i * 1.9 + 0.4)), m = i % 2 ? mat : curtainM2;
+      if (axis === 'x') W(m, lo, hi, y0, y1, c + off - 0.016, c + off + 0.016, nc);
+      else W(m, c + off - 0.016, c + off + 0.016, y0, y1, lo, hi, nc);
+    }
+  };
+
+  // ===========================================================================================
+  // SUÍTE VISITA
+  // ===========================================================================================
+  // ---- cômoda F (vista F): 266 × 55 × 110 Freijó, encostada na parede norte sob a janela ------------
+  {
+    const X0 = 4.375, X1 = 7.01, Z0 = 0.26, Z1 = 0.80, T = 1.10, CW = (X1 - X0) / 4;
+    const yRow = [0.10, 0.44, 0.77, 1.10];                  // linhas de baixo para cima: 34 / 33 / 33 (+10 de rodapé)
+    const nx0 = X0 + CW * 2;                                // início do nicho (colunas 3–4 da linha de baixo)
+    W(freijoDk, X0 + 0.01, X1 - 0.01, 0, 0.10, Z0 + 0.04, Z1 - 0.03, nc);                  // rodapé recuado 3 cm
+    W(freijoDk, X0, nx0, yRow[0], T - 0.02, Z0, Z1 - 0.022);                                // corpo (esquerda)
+    W(freijoDk, nx0, X1, yRow[1], T - 0.02, Z0, Z1 - 0.022);                                // corpo acima do nicho
+    // nicho aberto 133 × 34
+    W(freijoLt, nx0, X1, yRow[0] + 0.02, yRow[1], Z0, Z0 + 0.02, nc);                       // fundo
+    W(freijoDk, nx0, X1, yRow[0], yRow[0] + 0.02, Z0, Z1 - 0.022, nc);                      // soleira escura
+    W(freijoLt, nx0 + 0.005, X1 - 0.02, yRow[0] + 0.02, yRow[1] - 0.02, Z0 + 0.02, Z0 + 0.021, nc);
+    W(freijo, X1 - 0.02, X1, yRow[0], yRow[1], Z0, Z1);                                     // lateral direita do nicho
+    W(freijo, nx0 - 0.016, nx0, yRow[0], yRow[1], Z0, Z1);                                  // divisória esquerda do nicho
+    W(freijo, nx0, X1, yRow[1] - 0.02, yRow[1], Z0 + 0.02, Z1);                             // teto do nicho
+    // tampo
+    W(freijo, X0 - 0.003, X1 + 0.003, T - 0.02, T, Z0, Z1 + 0.012);
+    // frentes das gavetas (0,018 de espessura, folga de 3 mm)
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
+      if (r === 0 && c >= 2) continue;
+      const x0 = X0 + c * CW + 0.003, x1 = X0 + (c + 1) * CW - 0.003, y0 = yRow[r] + 0.003, y1 = (r === 2 ? T - 0.02 : yRow[r + 1]) - 0.003;
+      W(freijo, x0, x1, y0, y1, Z1 - 0.022, Z1);
+      const kx = (x0 + x1) / 2, ky = y1 - 0.045;                                        // botão central superior
+      const k = cyl(0.017, 0.017, 0.022, knobM, kx, ky, Z1 + 0.009, 14); k.rotation.x = PI / 2; put(k);
+    }
+    solid(X0, Z0, X1, Z1 + 0.02);
+    // ---- objetos sobre a cômoda (y = 1,10) ----
+    // abajur
+    put(cyl(0.05, 0.065, 0.2, ceramic, 4.76, T + 0.1, 0.55, 16));
+    put(cyl(0.012, 0.012, 0.1, dourado, 4.76, T + 0.25, 0.55, 8));
+    put(cyl(0.1, 0.14, 0.2, shadeM, 4.76, T + 0.36, 0.55, 20, true)).castShadow = false;
+    // bandeja com livros e vasinho
+    W(dourado, 5.45, 5.90, T, T + 0.012, 0.42, 0.70, nc);
+    W(book1, 5.48, 5.76, T + 0.012, T + 0.04, 0.46, 0.62); W(book2, 5.50, 5.74, T + 0.04, T + 0.062, 0.48, 0.60); W(book3, 5.52, 5.72, T + 0.062, T + 0.078, 0.49, 0.59);
+    put(cyl(0.032, 0.04, 0.1, ceramicBg, 5.80, T + 0.062, 0.56, 14));
+    puff(leafB, 5.80, T + 0.15, 0.56, 0.04, 0.04, 0.05, 0, 0, 0.5, nc);
+    // vaso alto com ramos secos
+    put(cyl(0.05, 0.07, 0.26, ceramicBg, 6.62, T + 0.13, 0.52, 16));
+    for (let i = 0; i < 7; i++) {
+      const b = cyl(0.004, 0.005, 0.5 + (i % 3) * 0.1, dryM, 6.62 + (i - 3) * 0.012, T + 0.5, 0.52 + (i % 2 - 0.5) * 0.02, 5); b.rotation.z = (i - 3) * 0.1; b.rotation.x = (i % 3 - 1) * 0.08; b.castShadow = false; put(b);
+      puff(dryM, 6.62 + (i - 3) * 0.045, T + 0.78 + (i % 3) * 0.06, 0.52, 0.012, 0.045, 0.012, 0, 0, (i - 3) * 0.1, nc);
+    }
+  }
+
+  // ---- cortina da janela norte (x 4,71–6,51): varão dourado, voal e duas folhas de linho -----------
+  {
+    const yT = 2.38, yB = 1.16;
+    const rod = cyl(0.011, 0.011, 2.30, dourado, 5.61, yT, 0.33, 10); rod.rotation.z = PI / 2; put(rod);
+    for (const sx of [4.46, 6.76]) { puff(dourado, sx, yT, 0.33, 0.026, 0.026, 0.026, 0, 0, 0, nc); }
+    for (const bx of [4.62, 6.60]) W(dourado, bx - 0.006, bx + 0.006, yT, yT + 0.05, 0.27, 0.29, nc);   // suportes
+    W(sheer, 4.58, 6.64, yB, yT + 0.03, 0.296, 0.302, nc);
+    pleats(curtainM, 'x', 4.52, 5.14, 0.335, 0.045, yB, yT + 0.01, 11);
+    pleats(curtainM, 'x', 6.08, 6.70, 0.335, 0.045, yB, yT + 0.01, 11);
+    // argolas de pano (cabeça das pregas)
+    W(curtainM2, 4.52, 5.14, yT - 0.03, yT + 0.015, 0.31, 0.38, nc); W(curtainM2, 6.08, 6.70, yT - 0.03, yT + 0.015, 0.31, 0.38, nc);
+  }
+
+  // ---- cama box casal nº 13: 138 × 188 (h 0,61), cabeceira na parede x 7,07 --------------------------
+  {
+    const X0 = 5.13, X1 = 7.01, Z0 = 1.35, Z1 = 2.73;
+    for (const [px, pz] of [[X0 + 0.06, Z0 + 0.06], [X0 + 0.06, Z1 - 0.06], [X1 - 0.06, Z0 + 0.06], [X1 - 0.06, Z1 - 0.06]]) W(legDark, px - 0.025, px + 0.025, 0, 0.07, pz - 0.025, pz + 0.025, nc);
+    W(skirtF, X0, X1, 0.07, 0.36, Z0, Z1);                                           // box (saia)
+    W(legDark, X0 + 0.002, X1, 0.065, 0.075, Z0 + 0.004, Z1 - 0.004, nc);            // sombra sob a saia
+    W(mattress, X0 + 0.01, X1, 0.36, 0.61, Z0 + 0.01, Z1 - 0.01);                    // colchão
+    // roupa de cama: lençol sobre o colchão, caídas laterais e do pé
+    W(duvet, X0 - 0.005, 6.78, 0.61, 0.645, Z0 + 0.002, Z1 - 0.002);
+    W(duvet, X0 - 0.005, 6.78, 0.40, 0.645, Z0 - 0.012, Z0 + 0.002);
+    W(duvet, X0 - 0.005, 6.78, 0.40, 0.645, Z1 - 0.002, Z1 + 0.012);
+    W(duvet, X0 - 0.014, X0 - 0.005, 0.40, 0.645, Z0 - 0.012, Z1 + 0.012);
+    // dobra do edredom (faixa mais escura) e manta greige no pé
+    W(duvetFold, 6.18, 6.62, 0.645, 0.68, Z0 + 0.012, Z1 - 0.012);
+    W(duvetFold, 6.18, 6.62, 0.43, 0.68, Z0 - 0.02, Z0 + 0.012); W(duvetFold, 6.18, 6.62, 0.43, 0.68, Z1 - 0.012, Z1 + 0.02);
+    W(throwM, 5.38, 5.76, 0.645, 0.668, Z0 + 0.01, Z1 - 0.01);
+    W(throwM, 5.38, 5.76, 0.42, 0.668, Z0 - 0.026, Z0 + 0.01); W(throwM, 5.38, 5.76, 0.42, 0.668, Z1 - 0.01, Z1 + 0.026);
+    // travesseiros
+    puff(pillow, 6.76, 0.72, 1.76, 0.18, 0.075, 0.30, 0, 0, -0.06);
+    puff(pillow, 6.76, 0.72, 2.32, 0.18, 0.075, 0.30, 0, 0, -0.06);
+    // almofadões encostados na parede
+    const b1 = box(0.13, 0.52, 0.56, pillow, 6.93, 0.92, 1.76); b1.rotation.z = 0.2; put(b1);
+    const b2 = box(0.13, 0.52, 0.56, pillow, 6.93, 0.92, 2.32); b2.rotation.z = 0.2; put(b2);
+    puff(pillowBlue, 6.68, 0.83, 2.03, 0.07, 0.17, 0.2, 0, 0, 0.35);                  // almofada decorativa
+    puff(pillowSand, 6.66, 0.8, 2.34, 0.06, 0.15, 0.17, 0, 0.25, 0.3);
+    solid(X0, Z0, X1, Z1);
+    // quadro acima da cabeceira (parede x 7,07, frente para −x)
+    picture(7.02, 1.38, 2.04, FNX, 0.95, 0.65, art0, frameG);
+  }
+
+  // ---- tapete da suíte visita (sob a cama, sobra no pé e nos lados; folga da porta é só de piso) ------
+  W(rugEdge, 4.85, 6.85, 0.004, 0.012, 1.00, 3.00, { cast: false });
+  W(rugField, 4.92, 6.78, 0.0125, 0.0135, 1.07, 2.93, { cast: false });
+  W(rugLine, 4.96, 6.74, 0.0136, 0.0142, 1.11, 2.89, { cast: false });
+  W(rugField2, 4.99, 6.71, 0.0143, 0.0148, 1.14, 2.86, { cast: false });
+
+  // planta no canto sudeste da suíte
+  plant(6.74, 3.0, 1.1, potDk, [4.37, 0.24, 7.02, 3.24]);
+  solid(6.61, 2.87, 6.87, 3.13);
+
+  // ===========================================================================================
+  // HALL ÍNTIMO — console e quadro na parede sul da suíte visita (face z 3,34)
+  // ===========================================================================================
+  {
+    const X0 = 5.35, X1 = 6.25, Z0 = 3.352, Z1 = 3.50;   // 15 cm a oeste: a folha da porta do hall → suíte master (dobradiça em z 4,16) gira livre
+    W(carvalho, X0, X1, 0.76, 0.80, Z0, Z1);                                          // tampo
+    W(carvalho, X0 + 0.01, X1 - 0.01, 0.69, 0.76, Z0 + 0.01, Z1 - 0.03);              // gaveta única
+    W(frape, X0 + 0.014, X1 - 0.014, 0.695, 0.755, Z1 - 0.03, Z1 - 0.012);            // frente da gaveta
+    const kp = box(0.14, 0.012, 0.012, dourado, (X0 + X1) / 2, 0.735, Z1 - 0.006, nc); put(kp);
+    for (const lx of [X0 + 0.04, X1 - 0.04]) for (const lz of [Z0 + 0.025, Z1 - 0.025]) W(dourado, lx - 0.012, lx + 0.012, 0, 0.69, lz - 0.012, lz + 0.012, nc);   // pés dourados
+    // objetos
+    put(cyl(0.045, 0.06, 0.2, ceramicBg, 5.51, 0.9, 3.43, 14));
+    for (let i = 0; i < 4; i++) { const b = cyl(0.004, 0.005, 0.38, dryM, 5.51 + (i - 1.5) * 0.012, 1.12, 3.43, 5); b.rotation.z = (i - 1.5) * 0.12; b.castShadow = false; put(b); }
+    W(book2, 5.85, 6.07, 0.80, 0.83, 3.38, 3.47); W(book3, 5.87, 6.05, 0.83, 0.85, 3.39, 3.46);
+    put(sph(0.04, dourado, 5.96, 0.89, 3.425));
+    solid(X0, Z0 - 0.01, X1, Z1);
+    // quadro (face z 3,34 → para +z)
+    picture(5.80, 1.12, 3.34, FZ, 0.80, 0.80, art1, frameG);
+  }
+
+  // ===========================================================================================
+  // SUÍTE AMERICANA 01 / SALA DE TV
+  // ===========================================================================================
+  // ---- armário E (vista E): 163 × 60 × 250 Frapê, costas na parede x 4,32 (face 4,255), portas para −x ---
+  {
+    const XB = 4.25, XF = 3.65, Z0 = 1.73, Z1 = 3.36, XD = XF + 0.018;                  // XD = face interna das portas
+    W(frapeDk, XF + 0.03, XB, 0, 0.10, Z0 + 0.02, Z1 - 0.02, nc);                       // rodapé recuado 3 cm
+    W(frapeGap, XD, XB, 0.10, 2.45, Z0, Z1);                                           // corpo (aparece nas frestas)
+    W(frape, XF, XB, 2.45, 2.50, Z0, Z1);                                              // tampo/arremate de 5 cm
+    const wd = [0.41, 0.41, 0.41, 0.40];
+    let z = Z0; const edges = [Z0];
+    for (const w of wd) {
+      W(frape, XF, XD, 0.103, 2.447, z + 0.002, z + w - 0.002);
+      z += w; edges.push(z);
+    }
+    // puxadores verticais dourados (pares nas junções 1|2 e 3|4, como na elevação)
+    for (const e of [edges[1], edges[3]]) for (const s of [-1, 1]) {
+      const pz = e + s * 0.03;
+      W(dourado, XF - 0.022, XF, 0.92, 1.52, pz - 0.007, pz + 0.007, nc);
+      W(dourado, XF - 0.022, XF - 0.012, 0.915, 0.925, pz - 0.007, pz + 0.007, nc);
+    }
+    solid(XF - 0.02, Z0, XB, Z1);
+  }
+
+  // ---- sofá-cama nº 11: Borneo Anjos, 2 módulos de 1 assento + 1 braço (102 cm cada), tecido cinza-esverdeado,
+  //      180 × 90 × 95, encosto na parede z 4,29 (assento virado para −z) ----
+  {
+    const X0 = 1.21, X1 = 3.01, Z0 = 3.34, Z1 = 4.23;
+    for (const px of [X0 + 0.07, X1 - 0.07]) for (const pz of [Z0 + 0.07, Z1 - 0.07]) W(legDark, px - 0.025, px + 0.025, 0, 0.09, pz - 0.025, pz + 0.025, nc);
+    W(fabricGray, X0, X1, 0.09, 0.27, Z0, Z1);                                          // base/estrutura
+    W(fabricSeam, X0 + 0.005, X1 - 0.005, 0.085, 0.10, Z0 + 0.02, Z1 - 0.02, nc);       // sombra sob a base
+    W(fabricGray, X0, X1, 0.27, 0.93, Z1 - 0.10, Z1);                                   // moldura do encosto
+    const AW = 0.14;                                                                    // braços (um em cada ponta)
+    W(fabricGray, X0, X0 + AW, 0.27, 0.64, Z0, Z1);
+    W(fabricGray, X1 - AW, X1, 0.27, 0.64, Z0, Z1);
+    W(fabricGrayLt, X0 + 0.01, X0 + AW - 0.01, 0.64, 0.665, Z0 + 0.01, Z1 - 0.10, nc);  // tampa dos braços
+    W(fabricGrayLt, X1 - AW + 0.01, X1 - 0.01, 0.64, 0.665, Z0 + 0.01, Z1 - 0.10, nc);
+    const mw = (X1 - X0 - 2 * AW) / 2;                                                  // dois módulos de assento
+    for (let i = 0; i < 2; i++) {
+      const a = X0 + AW + i * mw + 0.004, b = a + mw - 0.008;
+      W(fabricGrayLt, a, b, 0.27, 0.43, Z0 + 0.012, Z1 - 0.30);                         // almofada do assento
+      W(fabricSeam, a + 0.004, b - 0.004, 0.425, 0.432, Z0 + 0.03, Z1 - 0.32, nc);     // pesponto
+      const bk = box(b - a, 0.50, 0.17, fabricGrayLt, (a + b) / 2, 0.66, Z1 - 0.185); bk.rotation.x = -0.12; put(bk);   // encosto inclinado
+    }
+    W(fabricSeam, (X0 + X1) / 2 - 0.003, (X0 + X1) / 2 + 0.003, 0.28, 0.43, Z0 + 0.012, Z1 - 0.30, nc);   // junção dos módulos
+    puff(pillowBlue, X0 + 0.46, 0.64, Z1 - 0.30, 0.2, 0.2, 0.07, -0.3, 0.15, 0.1);
+    puff(pillow, X1 - 0.46, 0.64, Z1 - 0.30, 0.2, 0.2, 0.07, -0.3, -0.12, -0.1);
+    W(throwM, X1 - AW - 0.005, X1 - 0.005, 0.665, 0.685, Z0 + 0.08, Z0 + 0.42, nc);      // manta dobrada sobre o braço
+    solid(X0, Z0, X1, Z1 + 0.02);
+  }
+
+  // ---- mesa de centro redonda + tapete ----------------------------------------------------------
+  {
+    W(rugEdge, 1.42, 3.28, 0.004, 0.012, 2.20, 3.30, { cast: false });
+    W(rugField, 1.49, 3.21, 0.0125, 0.0135, 2.26, 3.24, { cast: false });
+    W(rugLine, 1.53, 3.17, 0.0136, 0.0142, 2.30, 3.20, { cast: false });
+    put(cyl(0.27, 0.27, 0.03, carvalho, 2.15, 0.375, 2.78, 28));
+    put(cyl(0.04, 0.05, 0.36, dourado, 2.15, 0.18, 2.78, 12));
+    put(cyl(0.17, 0.17, 0.02, dourado, 2.15, 0.01, 2.78, 20));
+    // objetos: livros e vasinho
+    W(book1, 2.00, 2.26, 0.39, 0.415, 2.70, 2.88); W(book2, 2.02, 2.24, 0.415, 0.435, 2.72, 2.86);
+    put(cyl(0.035, 0.045, 0.1, ceramic, 2.30, 0.44, 2.75, 14));
+    puff(leafB, 2.30, 0.52, 2.75, 0.05, 0.05, 0.06, 0, 0, 0.4, nc);
+    solid(1.88, 2.51, 2.42, 3.05);
+  }
+
+  // ---- cortina da porta de vidro da varanda (z 2,95–4,14): linho em pregas + voal + trilho ----------------
+  {
+    const yB = 0.02, yT = 2.46;
+    W(railM, 1.085, 1.23, yT, 2.5, 2.84, 4.22, nc);                                     // trilho no forro
+    W(sheer, 1.092, 1.098, yB, yT, 2.90, 4.18, nc);
+    pleats(curtainM, 'z', 2.90, 3.44, 1.125, 0.03, yB, yT, 14);                          // folha recolhida junto ao pilar
+    pleats(curtainM, 'z', 3.80, 4.18, 1.125, 0.03, yB, yT, 10);
+  }
+
+  // ---- quadro e planta da suíte americana -------------------------------------------------------
+  picture(2.0, 1.28, 1.69, FZ, 0.85, 0.65, art2, frameG);                                // parede norte (face z 1,69)
+  plant(1.58, 1.96, 1.15, potM, [1.31, 1.69, 4.27, 4.24]);
+  solid(1.44, 1.82, 1.72, 2.10);
+}
+
+function roomBanheiros(ctx) {
+  // ---------------------------------------------------------------------------
+  // BANHEIROS do Apartamento Vovó (APTO DIVINA · STORIA — Mota e Lopes).
+  //  1) Banheiro americano: box 0,85 × 1,11 (x 1,10–1,95 · z 0,47–1,58) com vidro e porta de correr,
+  //     ducha de chuva, registro, seixos no piso e numa faixa da parede, basculante com persiana (parede oeste);
+  //     vaso (x 1,95–2,77) com ducha higiênica; lavatório vista I (gabinete suspenso 136×55 Frapê, bancada de pedra
+  //     clara com cuba retangular, espelheira 136×110 de 3 portas).
+  //  2) Banho master (x 6,76–8,42 · z 4,37–6,42): vaso ao norte, box 0,87×0,99 com vidro fixo + porta de correr,
+  //     bancada/gabinete J 80×55 e espelheira 80×110 (2 portas), toalheiro.
+  //  3) Lavabo (x 6,77–8,44 · z 7,70–8,83): bancada de pedra 0,80×0,45 com cuba esculpida, torneira de parede,
+  //     gabinete Frapê, espelho, vaso.
+  // Paredes dos boxes revestidas até 2,40 (REVESTIMENTOS A/B/C e E/F) em porcelanato grande formato bege (juntas a 0,80/1,60).
+  // Pisos, paredes, portas, janelas e luzes são do cartão — aqui só revestimento do box, louças, metais e marcenaria.
+  // Colisores do modo Pessoa: ctx.addCollider(x0, z0, x1, z1) quando o cartão oferecer (ignorado se não existir).
+  // ---------------------------------------------------------------------------
+  const THREE = ctx.THREE, M = ctx.M;
+  const box = (...a) => ctx.box(...a), cyl = (...a) => ctx.cyl(...a), sph = (...a) => ctx.sph(...a);
+  const place = (...a) => ctx.place(...a), std = (o) => ctx.std(o), rnd = () => ctx.rnd();
+  const put = (m) => { ctx.add(m); return m; };
+  const G = () => new THREE.Group();
+  const nc = { cast: false };
+  const solid = (x0, z0, x1, z1) => {
+    if (typeof ctx.addCollider === 'function') ctx.addCollider(x0, z0, x1, z1);
+    else if (Array.isArray(ctx.colliders)) ctx.colliders.push({ x0, z0, x1, z1 });
+  };
+
+  // ---- Materiais (do cartão quando existirem; reservas para testes) ----
+  const ceramic = std({ color: 0xf7f6f3, roughness: 0.12 });
+  const chrome  = M.chrome || std({ color: 0xdadde0, roughness: 0.18, metalness: 0.9 });
+  const gold    = M.dourado || std({ color: 0xc9a86a, roughness: 0.3, metalness: 0.85 });
+  const mirror  = M.espelho || M.mirror || std({ color: 0xdfe6ea, roughness: 0.05, metalness: 1 });
+  const frape   = M.frape || std({ color: 0xd8cfc2, roughness: 0.6 });
+  const stone   = M.pedraClara || std({ color: 0xdccdb0, roughness: 0.4 });
+  const porc    = M.porcelanatoBege || std({ color: 0xc9bca6, roughness: 0.45 });
+  const glassM  = M.glass || std({ color: 0xcfe6ea, roughness: 0.05, transparent: true, opacity: 0.22 });
+  const frameD  = M.frameDark || std({ color: 0x161616, roughness: 0.5, metalness: 0.4 });
+  const dark    = std({ color: 0x1a1a1c, roughness: 0.6 });
+  const slot    = std({ color: 0x3b3833, roughness: 0.7 });                    // fresta / cava do puxador
+  const steelB  = std({ color: 0x9a9da0, roughness: 0.35, metalness: 0.8 });   // ralo linear
+  const towelM  = std({ color: 0xf3f0ea, roughness: 1 });
+  const towel2  = std({ color: 0xd9cfbf, roughness: 1 });
+  const zebraA  = std({ color: 0xe6dfd2, roughness: 1 });
+  const zebraB  = std({ color: 0xb9ad9a, roughness: 1 });
+  const white   = std({ color: 0xf3f2ee, roughness: 0.4 });
+  const green   = std({ color: 0x5f8a4e, roughness: 0.9 });
+  const hoseM   = std({ color: 0xcfd2d4, roughness: 0.3, metalness: 0.85 });
+
+  // Faixa de seixos (pedrisco) — textura desenhada no espaço virtual (largura × altura em m) para os seixos saírem redondos
+  const pebCache = new Map();
+  const pebbleMat = (wm, hm) => {
+    const key = wm.toFixed(2) + 'x' + hm.toFixed(2);
+    let m = pebCache.get(key); if (m) return m;
+    const asp = wm / hm;
+    const tex = ctx.makeTex(512, (g, s) => {
+      const W = asp >= 1 ? s : s * asp, Hh = asp >= 1 ? s / asp : s;
+      g.save(); g.scale(s / W, s / Hh);
+      g.fillStyle = '#8d8372'; g.fillRect(0, 0, W, Hh);
+      const px = W / wm;                             // pixels por metro
+      const tones = ['#c9bfaa', '#b3a78f', '#d8cfbd', '#9b9079', '#a89c84', '#e0d8c8'];
+      let seed = 17 + Math.round(wm * 100) * 3 + Math.round(hm * 100);
+      const r = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+      const n = Math.min(3600, Math.round(wm * hm * 3000));
+      for (let i = 0; i < n; i++) {
+        const x = r() * W, y = r() * Hh, rr = (0.012 + r() * 0.012) * px;
+        g.fillStyle = tones[Math.floor(r() * tones.length)];
+        g.beginPath(); g.ellipse(x, y, rr, rr * (0.7 + r() * 0.3), r() * 3.14, 0, 6.283); g.fill();
+        g.strokeStyle = 'rgba(60,52,40,0.35)'; g.lineWidth = Math.max(0.5, px * 0.003); g.stroke();
+      }
+      g.restore();
+    });
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    m = std({ map: tex, roughness: 0.8 });
+    pebCache.set(key, m); return m;
+  };
+
+  // ---- Revestimento de parede de box (12 mm) — placas grandes com juntas a 0,80 e 1,60 ----
+  const CL = 0.012;
+  const cladRect = (axis, f, dir, a, b, y0, y1, mat) => {
+    if (b - a < 0.01 || y1 - y0 < 0.01) return;
+    const c = f + dir * CL / 2, mid = (a + b) / 2, y = (y0 + y1) / 2;
+    put(axis === 'x' ? box(CL, y1 - y0, b - a, mat, c, y, mid, nc) : box(b - a, y1 - y0, CL, mat, mid, y, c, nc));
+  };
+  // axis 'x' = parede com x fixo (corre em z); 'z' = parede com z fixo (corre em x). cut = [a, b, y0, y1] (janela)
+  const clad = (axis, f, dir, a, b, cut) => {
+    const rows = [[0.02, 0.798], [0.802, 1.598], [1.602, 2.40]];
+    for (const [r0, r1] of rows) {
+      if (!cut || cut[3] <= r0 || cut[2] >= r1) { cladRect(axis, f, dir, a, b, r0, r1, porc); continue; }
+      cladRect(axis, f, dir, a, cut[0], r0, r1, porc);
+      cladRect(axis, f, dir, cut[1], b, r0, r1, porc);
+      cladRect(axis, f, dir, cut[0], cut[1], r0, Math.max(r0, cut[2]), porc);
+      cladRect(axis, f, dir, cut[0], cut[1], Math.min(r1, cut[3]), r1, porc);
+    }
+  };
+
+  // ---- Peças reutilizáveis (origem no centro da base; frente = +z) ----
+  // Vaso sanitário de caixa acoplada (comprimento total ≈ 0,65 com s = 1,1; fundo da caixa em z = −0,32)
+  const toilet = (s = 1.1) => {
+    const g = G();
+    g.add(box(0.37, 0.40, 0.17, ceramic, 0, 0.62, -0.205));                       // caixa acoplada
+    g.add(box(0.35, 0.025, 0.15, ceramic, 0, 0.83, -0.205));                      // tampa da caixa
+    g.add(cyl(0.022, 0.022, 0.012, chrome, -0.06, 0.845, -0.205, 12));            // botão duplo
+    g.add(cyl(0.022, 0.022, 0.012, chrome, 0.06, 0.845, -0.205, 12));
+    g.add(box(0.24, 0.40, 0.30, ceramic, 0, 0.20, -0.08));                        // pedestal
+    const bowl = cyl(0.19, 0.15, 0.20, ceramic, 0, 0.30, 0.045, 20); bowl.scale.set(1, 1, 1.32); g.add(bowl);
+    const rim = cyl(0.195, 0.195, 0.03, ceramic, 0, 0.405, 0.045, 20); rim.scale.set(1, 1, 1.32); g.add(rim);
+    const seat = cyl(0.185, 0.185, 0.03, white, 0, 0.435, 0.05, 20); seat.scale.set(1, 1, 1.30); g.add(seat);
+    const lid = cyl(0.178, 0.178, 0.018, white, 0, 0.462, 0.05, 20); lid.scale.set(1, 1, 1.28); g.add(lid);
+    g.add(box(0.30, 0.04, 0.04, ceramic, 0, 0.44, -0.12));                        // dobradiças
+    g.scale.set(s, s, s);
+    return g;
+  };
+  const tray = (r, x, y, z) => { put(cyl(r, r * 0.9, 0.012, gold, x, y + 0.006, z, 20)); };
+  const tulips = (x, y, z) => {                                                  // vasinho com tulipas brancas (render)
+    put(cyl(0.035, 0.03, 0.09, ceramic, x, y + 0.045, z, 12));
+    for (let i = 0; i < 5; i++) {
+      const a = i * 1.26, dx = Math.cos(a) * 0.02, dz = Math.sin(a) * 0.02, h = 0.11 + (i % 3) * 0.025;
+      put(cyl(0.003, 0.003, h, green, x + dx, y + 0.09 + h / 2, z + dz, 5));
+      const b = sph(0.016, i % 2 ? towelM : white, x + dx * 1.3, y + 0.09 + h + 0.012, z + dz * 1.3); b.scale.set(1, 1.35, 1); put(b);
+    }
+  };
+  const dispenser = (x, y, z) => {
+    put(cyl(0.03, 0.03, 0.14, ceramic, x, y + 0.07, z, 14));
+    put(cyl(0.008, 0.008, 0.05, chrome, x, y + 0.165, z, 8));
+    put(box(0.05, 0.012, 0.012, chrome, x + 0.02, y + 0.187, z, nc));
+  };
+  // Torneira monocomando alta (base em (x, y, z), bico para o lado +dz)
+  const faucetTall = (x, y, z, dz) => {
+    put(cyl(0.022, 0.026, 0.03, chrome, x, y + 0.015, z, 14));
+    put(cyl(0.012, 0.012, 0.19, chrome, x, y + 0.125, z, 12));
+    put(box(0.022, 0.022, Math.abs(dz) + 0.03, chrome, x, y + 0.225, z + dz / 2, nc));
+    put(box(0.014, 0.012, 0.05, chrome, x + 0.03, y + 0.125, z, nc));             // alavanca
+  };
+  // Ducha de chuva + braço (saindo de parede z fixa: wz = parede, dir = sentido para dentro do box)
+  const rainShower = (x, y, wz, dir) => {
+    put(cyl(0.02, 0.02, 0.012, chrome, x, y, wz + dir * 0.006, 12)).rotation.x = Math.PI / 2;
+    put(box(0.018, 0.018, 0.36, chrome, x, y, wz + dir * 0.18, nc));
+    put(cyl(0.012, 0.012, 0.06, chrome, x, y - 0.03, wz + dir * 0.34, 8));
+    put(cyl(0.12, 0.12, 0.012, chrome, x, y - 0.065, wz + dir * 0.34, 28));
+    put(cyl(0.105, 0.105, 0.004, steelB, x, y - 0.073, wz + dir * 0.34, 28));
+  };
+  const registro = (x, y, wz, dir) => {
+    const p = put(cyl(0.045, 0.045, 0.01, chrome, x, y, wz + dir * 0.005, 20)); p.rotation.x = Math.PI / 2;
+    const k = put(cyl(0.01, 0.01, 0.04, chrome, x, y, wz + dir * 0.03, 8)); k.rotation.x = Math.PI / 2;
+    put(box(0.07, 0.016, 0.016, chrome, x + 0.03, y, wz + dir * 0.045, nc));
+  };
+  // Ducha higiênica numa parede x fixa (wx, dir = sentido para dentro do banheiro)
+  const bidetSpray = (wx, dir, z, y) => {
+    const p = put(cyl(0.03, 0.03, 0.012, chrome, wx + dir * 0.006, y, z, 16)); p.rotation.z = Math.PI / 2;
+    put(box(0.05, 0.06, 0.03, chrome, wx + dir * 0.04, y - 0.03, z, nc));
+    const tor = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.005, 6, 18, Math.PI * 1.2), hoseM);
+    tor.position.set(wx + dir * 0.03, y - 0.16, z); tor.rotation.y = Math.PI / 2; tor.castShadow = false; put(tor);
+  };
+  const paperHolder = (wx, dir, z, y) => {
+    put(box(0.07, 0.03, 0.14, chrome, wx + dir * 0.035, y, z, nc));
+    put(cyl(0.055, 0.055, 0.115, white, wx + dir * 0.075, y, z, 16)).rotation.x = Math.PI / 2;
+  };
+
+  // ---- Bancada + gabinete suspenso + espelheira (construídos no local: fundo da parede em z = 0, frente em +z; x centrado) ----
+  // o: w largura, d profundidade, yb base do gabinete, yt topo da pedra, sink {x,z,w,d,depth}, faucet {x,z,dz,wall},
+  //    mir {y0,y1,doors,d} ou mirPlain {y0,y1}
+  const vanity = (o) => {
+    const g = G(); const w = o.w, d = o.d, yb = o.yb, yt = o.yt, th = 0.07, yc = yt - th;
+    const add = (m) => { g.add(m); return m; };
+    // pedra com recorte da cuba (4 tiras ao redor)
+    const s = o.sink, sx0 = s.x - s.w / 2, sx1 = s.x + s.w / 2, sz0 = s.z - s.d / 2, sz1 = s.z + s.d / 2;
+    const ys = (yt + yc) / 2;
+    add(box(w, th, sz0, stone, 0, ys, sz0 / 2));                                   // atrás da cuba
+    add(box(w, th, d - sz1, stone, 0, ys, (sz1 + d) / 2));                         // frente da cuba
+    add(box(sx0 + w / 2, th, s.d, stone, (sx0 - w / 2) / 2, ys, s.z));             // esquerda
+    add(box(w / 2 - sx1, th, s.d, stone, (sx1 + w / 2) / 2, ys, s.z));             // direita
+    // cuba branca
+    const dep = s.depth, yw = yc - dep + th;
+    add(box(0.012, dep + 0.004, s.d + 0.004, ceramic, sx0 + 0.006, yt - dep / 2 + 0.002, s.z, nc));
+    add(box(0.012, dep + 0.004, s.d + 0.004, ceramic, sx1 - 0.006, yt - dep / 2 + 0.002, s.z, nc));
+    add(box(s.w, dep + 0.004, 0.012, ceramic, s.x, yt - dep / 2 + 0.002, sz0 + 0.006, nc));
+    add(box(s.w, dep + 0.004, 0.012, ceramic, s.x, yt - dep / 2 + 0.002, sz1 - 0.006, nc));
+    add(box(s.w, 0.012, s.d, ceramic, s.x, yt - dep, s.z, nc));
+    add(cyl(0.025, 0.025, 0.006, chrome, s.x, yt - dep + 0.008, s.z, 14));          // válvula
+    // saia / corpo (carcaça com vão para a cuba)
+    const cd = d - 0.012, ct = yc - yb;                                             // carcaça um pouco recuada
+    const yUnder = yt - dep - 0.02;                                                 // fundo da cuba
+    add(box(w - 0.02, yUnder - yb, cd, frape, 0, (yb + yUnder) / 2, cd / 2 + 0.002));
+    add(box(w - 0.02, yc - yUnder, sz0 - 0.002, frape, 0, (yUnder + yc) / 2, sz0 / 2));
+    add(box(w - 0.02, yc - yUnder, cd - sz1 + 0.002, frape, 0, (yUnder + yc) / 2, (sz1 + cd) / 2));
+    add(box(sx0 + w / 2 - 0.01, yc - yUnder, s.d + 0.004, frape, (sx0 - w / 2 + 0.01) / 2, (yUnder + yc) / 2, s.z));
+    add(box(w / 2 - sx1 - 0.01, yc - yUnder, s.d + 0.004, frape, (sx1 + w / 2 - 0.01) / 2, (yUnder + yc) / 2, s.z));
+    // frentes: gaveta 20 embaixo, basculante 30 em cima (juntas de 3 mm); fresta de cava no alto de cada uma
+    const fy0 = yb, fy1 = yb + 0.20, fy2 = yc;
+    const fz = d - 0.002 + 0.009;
+    add(box(w - 0.006, fy1 - fy0 - 0.003, 0.018, frape, 0, (fy0 + fy1) / 2, fz - 0.009 + 0.002));
+    add(box(w - 0.006, fy2 - fy1 - 0.003, 0.018, frape, 0, (fy1 + fy2) / 2 + 0.0015, fz - 0.009 + 0.002));
+    add(box(w - 0.12, 0.012, 0.004, slot, 0, fy1 - 0.02, fz + 0.002, nc));
+    add(box(w - 0.12, 0.012, 0.004, slot, 0, fy2 - 0.02, fz + 0.002, nc));
+    // torneira
+    const f = o.faucet;
+    if (f.wall) {                                                                   // de parede
+      const p = add(cyl(0.03, 0.03, 0.012, chrome, f.x, f.y, 0.006, 16)); p.rotation.x = Math.PI / 2;
+      add(box(0.02, 0.02, f.dz, chrome, f.x, f.y, f.dz / 2, nc));
+      add(cyl(0.012, 0.012, 0.04, chrome, f.x, f.y - 0.02, f.dz - 0.01, 10));
+      add(box(0.014, 0.014, 0.05, chrome, f.x + 0.03, f.y, 0.045, nc));
+    } else {
+      add(cyl(0.022, 0.026, 0.03, chrome, f.x, yt + 0.015, f.z, 14));
+      add(cyl(0.012, 0.012, 0.19, chrome, f.x, yt + 0.125, f.z, 12));
+      add(box(0.022, 0.022, f.dz + 0.03, chrome, f.x, yt + 0.225, f.z + f.dz / 2, nc));
+      add(box(0.014, 0.012, 0.05, chrome, f.x + 0.032, yt + 0.125, f.z, nc));
+    }
+    // espelheira: caixa Frapê com portas espelhadas
+    if (o.mir) {
+      const m = o.mir, hh = m.y1 - m.y0, md = m.d;
+      add(box(w, hh, md, frape, 0, (m.y0 + m.y1) / 2, md / 2));
+      add(box(w, 0.05, md, frape, 0, m.y1 + 0.025, md / 2));                         // 5 cm de topo até 2,40
+      const dw = w / m.doors;
+      for (let i = 0; i < m.doors; i++) {
+        add(box(dw - 0.006, hh - 0.01, 0.012, mirror, -w / 2 + dw * (i + 0.5), (m.y0 + m.y1) / 2, md + 0.004, nc));
+      }
+      for (let i = 1; i < m.doors; i++) add(box(0.004, hh, 0.014, slot, -w / 2 + dw * i, (m.y0 + m.y1) / 2, md + 0.004, nc));
+    }
+    if (o.mirPlain) {
+      const m = o.mirPlain;
+      add(box(w, m.y1 - m.y0, 0.012, frape, 0, (m.y0 + m.y1) / 2, 0.006));
+      add(box(w - 0.04, m.y1 - m.y0 - 0.04, 0.008, mirror, 0, (m.y0 + m.y1) / 2, 0.016, nc));
+    }
+    return g;
+  };
+
+  // Vidro de box: vidro fino + perfis pretos
+  const glassPane = (x0, x1, y0, y1, z0, z1) => {
+    put(box(Math.max(x1 - x0, 0.008), y1 - y0, Math.max(z1 - z0, 0.008), glassM, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, nc));
+  };
+  const profile = (x0, x1, y0, y1, z0, z1) => {
+    put(box(x1 - x0, y1 - y0, z1 - z0, frameD, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, nc));
+  };
+
+  // ======================================================================
+  // 1) BANHEIRO AMERICANO
+  // ======================================================================
+  {
+    // revestimento do box: vista A (norte, mureta z 0,47), B (oeste, basculante), C (sul, z 1,585)
+    clad('z', 0.47, +1, 1.09, 1.95);
+    clad('x', 1.08, +1, 0.47, 1.585, [0.88, 1.46, 1.60, 2.26]);
+    clad('z', 1.585, -1, 1.09, 1.95);
+    // faixa de seixos sob a ducha (parede sul) e piso do box
+    const sx = 1.52;
+    put(box(0.30, 2.36, 0.012, pebbleMat(0.30, 2.36), sx, 1.20, 1.585 - CL - 0.006, nc));
+    put(box(0.85, 0.012, 1.10, pebbleMat(0.85, 1.10), 1.52, 0.012, 1.025, nc));
+    put(box(0.04, 0.008, 1.02, steelB, 1.91, 0.02, 1.03, nc));                       // ralo linear junto ao vidro
+    rainShower(sx, 2.20, 1.585 - CL, -1);
+    registro(sx, 1.10, 1.585 - CL, -1);
+    // persiana zebra sobre o basculante (parede oeste)
+    for (let i = 0; i < 9; i++) put(box(0.02, 0.07, 0.69, i % 2 ? zebraB : zebraA, 1.105, 2.27 - i * 0.075, 1.17, nc));
+    put(box(0.04, 0.05, 0.72, dark, 1.11, 2.34, 1.17, nc));
+    // vidro do box em x = 1,95: fixo z 0,47–0,92, porta de correr z 0,92–1,58
+    glassPane(1.946, 1.954, 0.03, 2.10, 0.47, 0.93);
+    profile(1.94, 1.96, 0.02, 0.04, 0.47, 1.58); profile(1.94, 1.96, 2.10, 2.12, 0.47, 1.58);
+    profile(1.94, 1.96, 0.02, 2.12, 0.47, 0.485);
+    glassPane(1.966, 1.974, 0.05, 2.07, 0.915, 1.575);
+    profile(1.962, 1.978, 0.04, 2.09, 0.915, 0.93); profile(1.962, 1.978, 0.04, 2.09, 1.56, 1.575);
+    profile(1.962, 1.978, 0.04, 0.06, 0.915, 1.575); profile(1.962, 1.978, 2.07, 2.09, 0.915, 1.575);
+    put(box(0.02, 0.50, 0.02, chrome, 1.99, 1.05, 0.985, nc));                     // puxador da porta
+    solid(1.93, 0.46, 1.97, 0.93);
+
+    // vaso + ducha higiênica + papeleiro (parede leste do compartimento: face x 2,785)
+    const t = toilet(); place(t, 2.27, 0.57, 0, 0);   // centro x ≈ 2,30 como na LAYOUT (a porta do compartimento gira livre)
+    solid(2.07, 0.24, 2.47, 0.80);   // vaso (só a louça; a frente da bacia fica livre para passar da porta ao box)
+    bidetSpray(2.785, -1, 0.66, 0.60);
+    paperHolder(2.785, -1, 0.48, 0.72);   // ao lado da caixa: a ponta da folha da porta (fecha em z 0,84) passa livre
+
+    // lavatório vista I: x 2,90–4,25 (136 cm), fundo na parede norte (face z 0,23)
+    const v = vanity({
+      w: 1.36, d: 0.55, yb: 0.33, yt: 0.90,
+      sink: { x: 0.175, z: 0.30, w: 0.46, d: 0.32, depth: 0.12 },
+      faucet: { x: 0.175, z: 0.07, dz: 0.19, wall: false },
+      mir: { y0: 1.25, y1: 2.35, doors: 3, d: 0.15 },
+    });
+    place(v, 3.575, 0.233, 0, 0);
+    solid(2.895, 0.23, 4.255, 0.79);
+    // objetos na bancada
+    tray(0.075, 3.18, 0.90, 0.46); tulips(3.18, 0.912, 0.46);
+    dispenser(4.16, 0.90, 0.40);
+    put(box(0.20, 0.03, 0.14, towelM, 3.36, 0.915, 0.62, nc)); put(box(0.20, 0.03, 0.14, towel2, 3.36, 0.945, 0.62, nc));
+  }
+
+  // ======================================================================
+  // 2) BANHO MASTER
+  // ======================================================================
+  {
+    // revestimento do box: vista E (oeste, face x 6,76), F (sul, face z 6,17)
+    clad('x', 6.76, +1, 5.17, 6.17);
+    clad('z', 6.17, -1, 6.77, 7.63);
+    const sx = 7.20;
+    put(box(0.30, 2.36, 0.012, pebbleMat(0.30, 2.36), sx, 1.20, 6.17 - CL - 0.006, nc));
+    put(box(0.86, 0.012, 0.99, pebbleMat(0.86, 0.99), 7.20, 0.012, 5.675, nc));
+    put(box(0.86, 0.008, 0.04, steelB, 7.20, 0.02, 5.23, nc));                     // ralo linear
+    rainShower(sx, 2.20, 6.17 - CL, -1);
+    registro(sx, 1.10, 6.17 - CL, -1);
+    // vidro: fixo em z = 5,17 (x 6,77–7,63) e em x = 7,63 (z 5,82–6,17); porta de correr em x = 7,645 (z 5,17–5,82)
+    glassPane(6.77, 7.63, 0.03, 2.10, 5.166, 5.174);
+    profile(6.77, 7.63, 0.02, 0.04, 5.16, 5.18); profile(6.77, 7.63, 2.10, 2.12, 5.16, 5.18);
+    profile(7.62, 7.64, 0.02, 2.12, 5.16, 5.18);
+    glassPane(7.626, 7.634, 0.03, 2.10, 5.80, 6.165);
+    profile(7.62, 7.64, 0.02, 0.04, 5.15, 6.17); profile(7.62, 7.64, 2.10, 2.12, 5.15, 6.17);
+    glassPane(7.646, 7.654, 0.05, 2.07, 5.175, 5.81);
+    profile(7.642, 7.658, 0.04, 2.09, 5.175, 5.19); profile(7.642, 7.658, 0.04, 2.09, 5.795, 5.81);
+    profile(7.642, 7.658, 0.04, 0.06, 5.175, 5.81); profile(7.642, 7.658, 2.07, 2.09, 5.175, 5.81);
+    put(box(0.02, 0.50, 0.02, chrome, 7.675, 1.05, 5.76, nc));                      // puxador
+    solid(7.60, 5.14, 7.68, 5.84);
+
+    // vaso ao norte + ducha higiênica (parede oeste, face x 6,76) + papeleiro
+    const t = toilet(); place(t, 7.22, 4.705, 0, 0);
+    solid(7.0, 4.37, 7.44, 5.05);
+    bidetSpray(6.76, +1, 4.78, 0.60);
+    paperHolder(6.76, +1, 4.55, 0.72);
+
+    // bancada J: 80×55, fundo na parede sul (face z 6,41), frente para −z
+    const v = vanity({
+      w: 0.78, d: 0.55, yb: 0.33, yt: 0.90,
+      sink: { x: 0, z: 0.30, w: 0.44, d: 0.30, depth: 0.12 },
+      faucet: { x: 0, z: 0.07, dz: 0.18, wall: false },
+      mir: { y0: 1.25, y1: 2.35, doors: 2, d: 0.15 },
+    });
+    place(v, 8.03, 6.405, Math.PI, 0);
+    solid(7.64, 5.85, 8.42, 6.41);
+    tray(0.075, 8.28, 0.90, 6.17); tulips(8.28, 0.912, 6.17);
+    put(box(0.18, 0.03, 0.13, towelM, 7.78, 0.915, 6.20, nc)); put(box(0.18, 0.03, 0.13, towel2, 7.78, 0.945, 6.20, nc));
+    // toalheiro de barras na parede leste (face x 8,43) com toalha
+    {
+      const wx = 8.43, z0 = 5.28, z1 = 5.76;
+      put(box(0.012, 0.50, 0.03, gold, wx - 0.006, 1.22, z0 + 0.015, nc)); put(box(0.012, 0.50, 0.03, gold, wx - 0.006, 1.22, z1 - 0.015, nc));
+      for (let i = 0; i < 4; i++) {
+        const b = put(cyl(0.01, 0.01, z1 - z0, gold, wx - 0.07, 1.03 + i * 0.13, (z0 + z1) / 2, 8)); b.rotation.x = Math.PI / 2;
+        put(box(0.07, 0.016, 0.016, gold, wx - 0.035, 1.03 + i * 0.13, z0 + 0.015, nc)); put(box(0.07, 0.016, 0.016, gold, wx - 0.035, 1.03 + i * 0.13, z1 - 0.015, nc));
+      }
+      put(box(0.02, 0.38, 0.30, towelM, wx - 0.075, 1.22, (z0 + z1) / 2, nc));
+    }
+  }
+
+  // ======================================================================
+  // 3) LAVABO (x 6,77–8,44 · z 7,70–8,83)
+  // ======================================================================
+  {
+    // bancada de pedra 0,80×0,45 com cuba esculpida; fundo na parede sul (face z 8,83), frente para −z
+    const v = vanity({
+      w: 0.80, d: 0.44, yb: 0.36, yt: 0.90,
+      sink: { x: 0, z: 0.23, w: 0.50, d: 0.30, depth: 0.09 },
+      faucet: { x: 0, y: 1.10, dz: 0.19, wall: true },
+      mirPlain: { y0: 1.10, y1: 2.15 },
+    });
+    place(v, 7.175, 8.828, Math.PI, 0);
+    solid(6.77, 8.38, 7.58, 8.83);
+    // saia de pedra frontal (aparece sob a bancada) já está na carcaça; objetos
+    tray(0.06, 7.40, 0.90, 8.62); tulips(7.40, 0.912, 8.62);
+    dispenser(6.93, 0.90, 8.62);
+    // vaso (encosto na parede sul, frente para −z) + ducha higiênica e papeleiro na parede leste (face x 8,43)
+    const t = toilet(); place(t, 8.075, 8.49, Math.PI, 0);
+    solid(7.85, 8.15, 8.30, 8.83);
+    bidetSpray(8.43, -1, 8.40, 0.60);
+    paperHolder(8.43, -1, 8.22, 0.72);
+    // toalheiro de argola na parede leste
+    put(cyl(0.012, 0.012, 0.012, gold, 8.424, 1.15, 7.95, 10)).rotation.z = Math.PI / 2;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.006, 6, 20), gold);
+    ring.position.set(8.40, 1.15, 7.95); ring.rotation.y = Math.PI / 2; ring.castShadow = false; put(ring);
+    put(box(0.015, 0.30, 0.20, towelM, 8.395, 1.0, 7.95, nc));
+  }
+}
 // @rooms-end
 
 // ---------------------------------------------------------------------------
@@ -2477,15 +4309,15 @@ export class AptoVovoCard extends HTMLElement {
 
     // ---- Banheiro americano (compartilhado pelas duas suítes de visita) ----
     solid(1.08, 0.24, 1.96, 0.47);                                    // mureta/viga do box (nicho da vista C)
-    wallZ(2.835, 0.24, 1.585, [{ a: 0.84, b: 1.5, t: 'door' }]);      // box + vaso ↔ lavatório
+    wallZ(2.835, 0.24, 1.585, [{ a: 0.84, b: 1.5, t: 'door', hinge: 'b' }]);      // box + vaso ↔ lavatório (dobradiça ao sul: a folha abre rente à parede z 1,59, longe do vaso — LAYOUT)
     wallX(1.637, 1.08, 4.37, [{ a: 2.9, b: 3.64, t: 'open' }]);       // sul; passagem de 0,74 sem folha do lavatório para a suíte americana (≈)
     // lavatório ↔ suíte visita (porta 0,70) · hall íntimo ↔ suíte americana (porta 0,80)
-    wallZ(4.315, 0.24, 4.29, [{ a: 0.84, b: 1.52, t: 'door' }, { a: 3.4, b: 4.2, t: 'door' }], tk(0.11));
+    wallZ(4.315, 0.24, 4.29, [{ a: 0.84, b: 1.52, t: 'door', hinge: 'b' }, { a: 3.4, b: 4.2, t: 'door', hinge: 'b' }], tk(0.11));
 
     // ---- Suítes e hall íntimo ----
     wallX(3.29, 4.37, 7.12, [{ a: 4.46, b: 5.23, t: 'door' }]);       // sul da suíte visita
     wallZ(7.07, 0.24, 3.34);                                          // suíte visita ↔ suíte master
-    wallZ(6.72, 3.34, 4.24, [{ a: 3.38, b: 4.2, t: 'door' }], tk(0.08));   // hall → suíte master (só batente)
+    wallZ(6.72, 3.34, 4.24, [{ a: 3.38, b: 4.2, t: 'door', hinge: 'b' }], tk(0.08));   // hall → suíte master (só batente)
     // sala ↔ suíte americana/hall (parede do painel C); o vão do hall (x 5,59–6,46) é fechado pela porta de correr de marcenaria
     // (MDF Carvalho Natural, ≈ 1,18 × 2,49), que corre para −x pela face do hall
     wallX(4.29, 1.04, 6.66, [{ a: 5.59, b: 6.46, t: 'mslide', leafA: 5.5, leafB: 6.68, h: 2.49, side: -1, run: 1.1 }]);
@@ -2493,7 +4325,7 @@ export class AptoVovoCard extends HTMLElement {
     wallZ(6.71, 4.24, 8.83, [{ a: 6.53, b: 7.59, t: 'open' }]);
 
     // ---- Banho master, hall de entrada e lavabo ----
-    wallX(4.31, 6.66, 8.55, [{ a: 7.72, b: 8.36, t: 'door' }], tk(0.11));   // norte do banho master (porta pela antecâmara)
+    wallX(4.31, 6.66, 8.55, [{ a: 7.72, b: 8.36, t: 'door', hinge: 'b' }], tk(0.11));   // norte do banho master (porta pela antecâmara)
     solid(6.66, 6.17, 7.63, 6.53);                                    // sul do box + shaft
     wallX(6.47, 7.63, 8.49, [], tk(0.12));                            // sul do banho master (fundo da bancada J)
     wallX(7.645, 6.71, 8.49, [{ a: 6.85, b: 7.52, t: 'door' }], tk(0.11));  // norte do lavabo
@@ -2522,7 +4354,7 @@ export class AptoVovoCard extends HTMLElement {
   // o = { h, mat, cap, frame (caixilho; padrão preto), doorFrame (batente/guarnição; padrão madeira), inner (±1: lado do
   //   revestimento claro), ext (estende T/2 nas pontas; ext0/ext1 só no início/fim), clad: [{ side ±1, mat, a, b }] (revestimento
   //   de 12 mm num lado, entre a e b — ex.: face preta do templo) }
-  // Aberturas: door (style 'black' = preta de correr, side = lado do trilho) · window (sill/top opcionais) · glass ·
+  // Aberturas: door (style 'black' = preta de correr, side = lado do trilho; hinge 'b' = dobradiça na ponta b, como na planta) · window (sill/top opcionais) · glass ·
   //   glassdoor (2 folhas, item) · open · gate · curtain (peitoril + envidraçamento de sacada) · slideglass (porta de correr de
   //   vidro com n folhas; `open` = índice da folha corrida) · entry (porta de entrada ligada ao sensor `item`) · mslide (porta de
   //   correr de marcenaria: leafA/leafB = folha fechada, h, side = face por onde corre, run = curso para −u)
@@ -2686,7 +4518,7 @@ export class AptoVovoCard extends HTMLElement {
   }
   _doorAdd(axis, c, t, op, M) {
     const glass2 = op.style === 'glass2', two = op.style === 'black2' || glass2, black = op.style === 'black' || two;
-    const w = op.b - op.a, mid = (op.a + op.b) / 2, sd = op.side || -1, hx = op.b - 0.1;
+    const hb = op.hinge === 'b', w = op.b - op.a, mid = (op.a + op.b) / 2, sd = op.side || -1, hx = hb ? op.a + 0.1 : op.b - 0.1;   // hinge 'b': dobradiça na ponta b (alavanca perto de a)
     const d = this._doorNew({ kind: two ? 'double' : black ? 'slide' : 'swing', axis, c, t, a: op.a, b: op.b, sd, latOff: sd * (t / 2 + 0.05) });
     const ln = (n) => (axis === 'x' ? n : -n);
     const lf = (u, dirU, len) => { const l = { u, dirU, len, parts: [], lag: false }; d.leaves.push(l); return l; };
@@ -2711,12 +4543,12 @@ export class AptoVovoCard extends HTMLElement {
       part(l, 'box', M.pretoFosco, [w - 0.08, 2.06, 0.04], mid, 1.03, 0, true, true);
       for (const s2 of [-1, 1]) part(l, 'box', M.frameDark, [0.025, 0.4, 0.025], op.b - 0.1, 1.05, s2 * 0.045, false, true);
     } else {
-      const l = lf(op.a + 0.04, 1, w - 0.08);   // dobradiça no lado oposto à alavanca
+      const l = hb ? lf(op.b - 0.04, -1, w - 0.08) : lf(op.a + 0.04, 1, w - 0.08);   // dobradiça no lado oposto à alavanca
       part(l, 'box', M.door, [w - 0.08, 2.06, 0.04], mid, 1.03, 0, true, true);
       for (const s2 of [-1, 1]) {
         part(l, 'cyl', M.chrome, null, hx, 1.02, s2 * 0.026, false, false);   // roseta
-        part(l, 'box', M.chrome, [0.13, 0.02, 0.022], hx - 0.05, 1.02, s2 * 0.05, false, true);   // alavanca
-        l.parts[l.parts.length - 1].lever = [hx - l.u, 1.02];   // gira em torno da roseta (x local da folha, y) quando a pessoa "aperta" a maçaneta
+        part(l, 'box', M.chrome, [0.13, 0.02, 0.022], hx + (hb ? 0.05 : -0.05), 1.02, s2 * 0.05, false, true);   // alavanca (aponta para a dobradiça)
+        l.parts[l.parts.length - 1].lever = [hx - l.u, 1.02, hb ? -1 : 1];   // gira em torno da roseta (x local da folha, y) quando a pessoa "aperta" a maçaneta
       }
       d.lever = true;
     }
@@ -2815,8 +4647,8 @@ export class AptoVovoCard extends HTMLElement {
       for (const pt of l.parts) {
         if (pt.lever && hang > 0.001) {
           // alavanca: gira em torno da roseta (eixo = normal da folha), como se a mão a apertasse
-          const cs = Math.cos(hang), sn = Math.sin(hang), px = pt.lever[0], py = pt.lever[1];
-          m2.makeRotationZ(hang); const f = m2.elements; f[12] = px - cs * px + sn * py; f[13] = py - sn * px - cs * py;
+          const hg = hang * (pt.lever[2] || 1), cs = Math.cos(hg), sn = Math.sin(hg), px = pt.lever[0], py = pt.lever[1];
+          m2.makeRotationZ(hg); const f = m2.elements; f[12] = px - cs * px + sn * py; f[13] = py - sn * px - cs * py;
           m2.multiply(pt.local); m3.multiplyMatrices(m1, m2);
         } else m3.multiplyMatrices(m1, pt.local);
         pt.mesh.setMatrixAt(pt.idx, m3);
@@ -3176,6 +5008,10 @@ export class AptoVovoCard extends HTMLElement {
     // @room banheiros
     roomBanheiros(ctx(25));
     // @endroom
+    // patamar diante da porta de entrada: três paredes invisíveis (só colisão) para a Pessoa não sair andando pelo vazio
+    addCollider(LANDING.x1, LANDING.z0 - 0.05, LANDING.x1 + 0.1, LANDING.z1 + 0.05, 2.6);
+    addCollider(8.54, LANDING.z0 - 0.1, LANDING.x1 + 0.1, LANDING.z0, 2.6);
+    addCollider(8.54, LANDING.z1, LANDING.x1 + 0.1, LANDING.z1 + 0.1, 2.6);
     // colisores empurrados direto no array ctx.colliders
     for (const o of ctxs) for (const c of o.colliders.splice(0)) {
       if (Array.isArray(c)) addCollider(c[0], c[1], c[2], c[3], c[4]);
@@ -3928,6 +5764,10 @@ export class AptoVovoCard extends HTMLElement {
     }
     fill(blk, LOT.x0, LOT.z0, LOT.x1, LOT.z0 + 0.5); fill(blk, LOT.x0, LOT.z1 - 0.5, LOT.x1, LOT.z1);
     fill(blk, LOT.x0, LOT.z0, LOT.x0 + 0.5, LOT.z1); fill(blk, LOT.x1 - 0.5, LOT.z0, LOT.x1, LOT.z1);
+    // o apartamento fica num andar alto: fora da planta (cômodos de ZONES) só o patamar diante da porta de entrada é piso
+    const inPlan = (x, z) => (x >= LANDING.x0 && x <= LANDING.x1 && z >= LANDING.z0 && z <= LANDING.z1)
+      || Object.values(ZONES).some((zn) => (zn.rects || []).some(([rx, rz, rw, rd]) => x >= rx - 0.12 && x <= rx + rw + 0.12 && z >= rz - 0.12 && z <= rz + rd + 0.12));
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) if (!inPlan(x0 + (i + 0.5) * CS, z0 + (j + 0.5) * CS)) blk[j * nx + i] = 1;
     for (const b of this._furnObs || []) fill(fur, b[0] - 0.3, b[1] - 0.3, b[2] + 0.3, b[3] + 0.3);   // móveis (não travam, mas o ponto de entrada os evita)
     return (this._ng = { CS, x0, z0, nx, nz, blk, fur });
   }
